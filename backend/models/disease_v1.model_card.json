@@ -1,0 +1,54 @@
+{
+  "name": "disease_v1",
+  "task": "crop leaf disease classification",
+  "architecture": "MobileNetV3-Small, int8 quantised",
+  "input": {
+    "size": [
+      224,
+      224,
+      3
+    ],
+    "dtype": "uint8"
+  },
+  "classes": [
+    "rice__blast",
+    "rice__brown_spot",
+    "rice__bacterial_leaf_blight",
+    "rice__normal",
+    "maize__common_rust",
+    "potato__late_blight",
+    "wheat__leaf_rust"
+  ],
+  "size_bytes": 0,
+  "training_data": {
+    "rice": "Paddy Doctor (16,225 field images)",
+    "maize": "PlantVillage corn subset",
+    "potato": "PlantVillage potato subset",
+    "wheat": "WFD2020 + CGIAR rust (limited)"
+  },
+  "evaluation": {
+    "in_domain_accuracy": 0.0,
+    "field_accuracy_plantdoc": 0.0,
+    "reported_accuracy": 0.0,
+    "note": "NOT YET TRAINED. Published as a card so peers can see what this node intends to train and how it will be evaluated. The accuracy figures are placeholders and must not be read as results."
+  },
+  "split_rule": "by source image id, never random (prevents near-duplicate leakage)",
+  "limitations": [
+    "Covers rice, maize, potato and wheat only. Other crops are routed to cloud diagnosis and must not use this model.",
+    "Wheat training data is thin (~2,400 images); wheat predictions are gated at a higher confidence threshold at inference time.",
+    "Trained predominantly on Indian and North American imagery; performance elsewhere is unmeasured."
+  ],
+  "intended_use": "First-pass screening with a confidence gate and expert review.",
+  "not_intended_for": "Unsupervised treatment decisions or regulatory use.",
+  "license": "Apache-2.0 (weights); source datasets keep their own licences.",
+  "training_config": {
+    "data_dir": "(not yet trained)",
+    "export_path": "models/disease_v1.tflite",
+    "epochs": 30,
+    "learning_rate": 0.001,
+    "fine_tune_lr": 0.0001,
+    "dropout": 0.3,
+    "label_smoothing": 0.1
+  },
+  "version": "0-untrained"
+}

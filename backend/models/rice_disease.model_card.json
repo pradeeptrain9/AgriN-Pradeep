@@ -1,0 +1,70 @@
+{
+  "name": "rice_disease",
+  "version": "1.0.0",
+  "task": "rice leaf disease classification",
+  "architecture": "MobileNetV3-Small, dynamic-range quantised TFLite",
+  "input": {
+    "size": [
+      224,
+      224,
+      3
+    ],
+    "dtype": "float32",
+    "range": "0-255"
+  },
+  "classes": [
+    "rice__bacterial_leaf_blight",
+    "rice__bacterial_leaf_streak",
+    "rice__bacterial_panicle_blight",
+    "rice__blast",
+    "rice__brown_spot",
+    "rice__downy_mildew",
+    "rice__hispa",
+    "rice__normal",
+    "rice__stem_borer",
+    "rice__tungro"
+  ],
+  "size_bytes": 1135032,
+  "deployment_status": "APPROVED for first-pass screening behind the confidence gate.",
+  "training_data": {
+    "rice": "Paddy Doctor via Kaggle (10,407 smartphone field images, 10 classes including normal) plus 65% of the Mendeley 'Rice Leaf Disease Image Samples' set (fwcj7stb8r). Both deduplicated by content hash before splitting; 11,896 training images."
+  },
+  "evaluation": {
+    "reported_accuracy": 0.981,
+    "reported_accuracy_meaning": "Accuracy of predictions ACTUALLY SHOWN to a farmer, i.e. those that clear the on-device confidence gate. This is the number that matters, because nothing else reaches the user.",
+    "coverage": 0.444,
+    "coverage_meaning": "44.4% of photos are answered on device; the other 55.6% are escalated to cloud diagnosis or returned inconclusive.",
+    "raw_model_accuracy": 0.786,
+    "escalated_would_have_been": 0.63,
+    "in_domain_accuracy": 0.8224,
+    "in_domain_note": "Paddy Doctor held-out validation, 10 classes, deduplicated.",
+    "same_collection_test_accuracy": 0.994,
+    "same_collection_test_note": "Mendeley slice B, 1,677 images, hash-disjoint from training. It is the SAME COLLECTION as part of the training data and covers only 4 of the 10 classes, so it is NOT a cross-collection estimate and must not be quoted as one.",
+    "healthy_leaves_shown_a_disease_label": "0 of 18 (gate-filtered); raw model errs on 37% of healthy leaves, all of which the gate escalates",
+    "weakest_shown_classes": {
+      "rice__hispa": 0.846,
+      "rice__bacterial_leaf_blight": 0.875
+    },
+    "leakage_check": "PASSED. check_leakage.py verified zero hash overlap between train, val and test, and zero duplicates within any split."
+  },
+  "split_rule": "Deduplicated by MD5 before splitting so no duplicate can straddle a boundary. Enforced by check_leakage.py, which aborts training.",
+  "limitations": [
+    "Rice only. The other 13 crops in the AgriN registry are unsupported and are routed to cloud diagnosis by the coverage gate.",
+    "NO cross-collection accuracy estimate exists. Both evaluation sets come from collections that also contributed training data. Real field performance in an unseen region is unmeasured and should be assumed lower.",
+    "Trained on Indian imagery (Tamil Nadu and Bangladesh-region collections). Performance elsewhere is unknown.",
+    "Answers only 44% of photos. The rest need connectivity for cloud diagnosis, or return inconclusive offline.",
+    "Raw accuracy is 0.786; the 0.981 figure holds ONLY with the confidence gate in place. Deploying these weights without the gate would be unsafe.",
+    "bacterial_leaf_blight is the weakest class in the raw model (0.500) and is bacterial, so a fungicide would not help even when correct."
+  ],
+  "intended_use": "First-pass screening on a farmer's phone, behind the coverage and confidence gate in app/ai/disease.py, with expert review advised.",
+  "not_intended_for": "Unsupervised treatment decisions, regulatory use, or any deployment without the confidence gate.",
+  "license": "Apache-2.0 (weights); source datasets keep their own licences.",
+  "quantisation": {
+    "strategy": "dynamic-range",
+    "rejected_strategies": [
+      "int8 with uint8 I/O - artifact failed allocate_tensors ('Node 119 failed to prepare'); MobileNetV3 hard-swish and squeeze-excite do not survive an int8-only op set",
+      "int8 weights with float activations - same failure"
+    ],
+    "note": "Each candidate is loaded and run once before acceptance."
+  }
+}

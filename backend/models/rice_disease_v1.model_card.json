@@ -1,0 +1,70 @@
+{
+  "name": "rice_disease_v1",
+  "version": "1-not-for-deployment",
+  "task": "rice leaf disease classification",
+  "architecture": "MobileNetV3-Small, dynamic-range quantised TFLite",
+  "input": {
+    "size": [
+      224,
+      224,
+      3
+    ],
+    "dtype": "float32"
+  },
+  "classes": [
+    "rice__bacterial_leaf_blight",
+    "rice__bacterial_leaf_streak",
+    "rice__bacterial_panicle_blight",
+    "rice__blast",
+    "rice__brown_spot",
+    "rice__downy_mildew",
+    "rice__hispa",
+    "rice__normal",
+    "rice__stem_borer",
+    "rice__tungro"
+  ],
+  "size_bytes": 1135032,
+  "deployment_status": "REJECTED. Not bundled in the app. See evaluation.",
+  "training_data": {
+    "rice": "Paddy Doctor via Kaggle (imbikramsaha/paddy-doctor), 10,407 smartphone field images, 10 classes including normal. 8,842 train / 1,565 validation, stratified random split."
+  },
+  "evaluation": {
+    "in_domain_accuracy": 0.701,
+    "cross_dataset_accuracy": 0.1593,
+    "reported_accuracy": 0.1593,
+    "cross_dataset_source": "Mendeley 'Rice Leaf Disease Image Samples' (fwcj7stb8r), 5,932 images, different collectors and region, never trained on",
+    "cross_dataset_classes": [
+      "rice__bacterial_leaf_blight",
+      "rice__blast",
+      "rice__brown_spot",
+      "rice__tungro"
+    ],
+    "cross_dataset_per_class": {
+      "rice__bacterial_leaf_blight": 0.0202,
+      "rice__blast": 0.2194,
+      "rice__brown_spot": 0.1144,
+      "rice__tungro": 0.3165
+    },
+    "chance_level_on_cross_dataset": 0.25,
+    "note": "The cross-dataset accuracy of 0.159 is BELOW the 0.25 chance level for its four classes. Predictions spread across all ten classes at near-random rates rather than collapsing to one, which indicates the model learned features specific to the Paddy Doctor collection - camera, framing, background, growth stage - rather than disease morphology. Training longer made this worse: in-domain rose from 0.545 to 0.701 while cross-dataset fell from 0.280 to 0.159. That divergence is the signature of dataset overfitting."
+  },
+  "split_rule": "Stratified random. Paddy Doctor filenames are bare sequential ids and carry no source-leaf grouping, so the by-source split used for PlantVillage could not be applied. The in-domain figure is optimistic for this reason.",
+  "limitations": [
+    "NOT FIT FOR DEPLOYMENT. Cross-dataset accuracy is below chance.",
+    "Covers rice only. The other 13 crops in the AgriN registry are unsupported and must route to cloud diagnosis.",
+    "Trained on a single collection from one region of Tamil Nadu; performance on other geographies, seasons and cameras is unmeasured and likely worse.",
+    "Class imbalance was 5:1 and handled by loss weighting only, not resampling.",
+    "Trained on CPU for 24 epochs and still improving at cutoff, so it is undertrained as well as non-generalising."
+  ],
+  "intended_use": "None at present. Published so peer nodes can see the negative result and avoid repeating it.",
+  "not_intended_for": "Any farmer-facing diagnosis.",
+  "license": "Apache-2.0 (weights); source datasets keep their own licences.",
+  "quantisation": {
+    "strategy": "dynamic-range",
+    "rejected_strategies": [
+      "int8 (uint8 I/O) - artifact failed allocate_tensors: 'Node 119 failed to prepare'. MobileNetV3 hard-swish and squeeze-excite blocks do not survive an int8-only op set.",
+      "int8 weights with float activations - same allocation failure."
+    ],
+    "note": "Every candidate artifact is smoke-tested by loading it and running one inference before it is accepted."
+  }
+}

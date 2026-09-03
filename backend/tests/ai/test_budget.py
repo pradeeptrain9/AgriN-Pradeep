@@ -1,0 +1,84 @@
+"""The cost table and the caps.
+
+A ledger that prices calls wrongly is worse than no ledger, because the number
+it reports would be believed and planned against.
+"""
+
+from dataclasses import dataclass
+
+import pytest
+
+from app.ai import budget
+
+
+@dataclass
+class FakeUsage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+
+
+def test_prices_input_and_output_at_the_published_rates():
+    # Opus 5: $5 per Mtok in, $25 per Mtok out.
+    usd = budget.price("claude-opus-5", FakeUsage(input_tokens=1_000_000))
+    assert usd == pytest.approx(5.00)
+
+    usd = budget.price("claude-opus-5", FakeUsage(output_tokens=1_000_000))
+    assert usd == pytest.approx(25.00)
+
+
+def test_output_tokens_dominate_a_typical_diagnosis():
+    # The realistic shape of one leaf photo: a 640px image plus a short prompt
+    # in, a structured answer plus thinking out. Output is where the money is,
+    # which is why effort is the lever that matters and image size is not.
+    usd = budget.price(
+        "claude-opus-5", FakeUsage(input_tokens=800, output_tokens=2000)
+    )
+    assert usd == pytest.approx(0.054, abs=0.001)
+
+
+def test_cache_reads_are_a_tenth_of_input():
+    full = budget.price("claude-opus-5", FakeUsage(input_tokens=100_000))
+    cached = budget.price("claude-opus-5", FakeUsage(cache_read_input_tokens=100_000))
+    assert cached == pytest.approx(full * 0.1)
+
+
+def test_cache_writes_cost_more_than_plain_input():
+    full = budget.price("claude-opus-5", FakeUsage(input_tokens=100_000))
+    written = budget.price(
+        "claude-opus-5", FakeUsage(cache_creation_input_tokens=100_000)
+    )
+    assert written == pytest.approx(full * 1.25)
+
+
+def test_cheaper_models_price_lower():
+    usage = FakeUsage(input_tokens=1_000_000, output_tokens=100_000)
+    opus = budget.price("claude-opus-5", usage)
+    sonnet = budget.price("claude-sonnet-5", usage)
+    haiku = budget.price("claude-haiku-4-5", usage)
+    assert haiku < sonnet < opus
+
+
+def test_an_unknown_model_prices_at_zero_rather_than_guessing():
+    # A guessed rate would be silently wrong in the ledger. Zero is visibly
+    # wrong, which is the failure mode to prefer.
+    assert budget.price("some-future-model", FakeUsage(input_tokens=1_000_000)) == 0.0
+
+
+def test_missing_usage_fields_do_not_raise():
+    class Sparse:
+        input_tokens = 500
+
+    assert budget.price("claude-opus-5", Sparse()) == pytest.approx(0.0025)
+
+
+def test_none_usage_does_not_raise():
+    assert budget.price("claude-opus-5", None) == 0.0
+
+
+@pytest.mark.parametrize("field", ["input_tokens", "output_tokens"])
+def test_none_valued_token_counts_are_treated_as_zero(field):
+    usage = FakeUsage()
+    setattr(usage, field, None)
+    assert budget.price("claude-opus-5", usage) == 0.0
