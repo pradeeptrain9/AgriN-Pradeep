@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.local
+*.sqlite3
+.pytest_cache/
+.ruff_cache/
+node_modules/
+data/
+media/
+# Training checkpoints: 10 MB each, regenerable from training/, and superseded
+# by the exported .tflite. The exported model is NOT ignored -- it is the thing
+# the app runs and the thing the federation model registry serves, so it has to
+# be in the repository for either to work from a clean clone.
+*.keras
+*.h5
+
+# Training scratch: caches, exports, and intermediate splits.
+training/runs/
+training/exports/
+.DS_Store
