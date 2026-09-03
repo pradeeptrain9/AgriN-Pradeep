@@ -1,0 +1,27 @@
+services:
+  db:
+    # timescaledb-ha bundles PostGIS + TimescaleDB on PG16
+    image: timescale/timescaledb-ha:pg16
+    environment:
+      POSTGRES_USER: agrin
+      POSTGRES_PASSWORD: agrin
+      POSTGRES_DB: agrin
+    ports: ["5433:5432"]
+    volumes: ["agrin_pgdata:/home/postgres/pgdata/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agrin"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6380:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  agrin_pgdata:

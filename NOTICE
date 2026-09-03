@@ -1,0 +1,20 @@
+AgriN -- Interoperable Digital Agriculture Network
+
+Source code is licensed under the Apache License, Version 2.0 (see LICENSE).
+Documentation and any data published by a node are licensed CC-BY-4.0.
+
+Third-party data used at runtime keeps its own terms:
+
+  Copernicus Sentinel-2      Copernicus Sentinel data, free and open licence
+  Open-Meteo                 CC-BY-4.0, NON-COMMERCIAL use on the free tier
+  ISRIC SoilGrids            CC-BY-4.0
+  OpenStreetMap tiles        ODbL. The public tile service has a usage policy
+                             that forbids bulk downloading; production nodes
+                             must serve their own basemap.
+  AGROVOC                    CC-BY-4.0, FAO
+  Paddy Doctor / PlantVillage / PlantDoc
+                             Each dataset keeps its own licence; see
+                             training/README.md before redistributing weights.
+
+Operators are responsible for checking that their intended use complies with
+each source's terms, particularly Open-Meteo's non-commercial restriction.

@@ -1,0 +1,28 @@
+{
+  "classes": [
+    "rice__bacterial_leaf_blight",
+    "rice__bacterial_leaf_streak",
+    "rice__bacterial_panicle_blight",
+    "rice__blast",
+    "rice__brown_spot",
+    "rice__downy_mildew",
+    "rice__hispa",
+    "rice__normal",
+    "rice__stem_borer",
+    "rice__tungro"
+  ],
+  "in_domain_accuracy": 0.8261400461196899,
+  "cross": {
+    "accuracy": 0.9913151364764268,
+    "images": 3224,
+    "classes_evaluated": [
+      "rice__bacterial_leaf_blight",
+      "rice__brown_spot"
+    ],
+    "per_class_accuracy": {
+      "rice__bacterial_leaf_blight": 0.9963,
+      "rice__brown_spot": 0.9864
+    }
+  },
+  "size_bytes": 1135032
+}

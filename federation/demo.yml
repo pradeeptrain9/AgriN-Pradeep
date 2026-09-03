@@ -1,0 +1,68 @@
+# Two AgriN nodes in containers.
+#
+# The same exchange federation/demo.sh runs locally, packaged so another country
+# can see the whole thing without a Python environment. Each node gets its own
+# database and generates its own Ed25519 identity on first start -- that
+# separation is what makes this a federation rather than one service talking to
+# itself.
+#
+#   docker compose -f federation/demo.yml up --build
+#   docker compose -f federation/demo.yml exec node-br python -m federation_demo
+#
+name: agrin-federation-demo
+
+services:
+  db-in:
+    image: timescale/timescaledb-ha:pg16
+    environment:
+      POSTGRES_USER: agrin
+      POSTGRES_PASSWORD: agrin
+      POSTGRES_DB: agrin
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agrin"]
+      interval: 5s
+      retries: 20
+
+  db-br:
+    image: timescale/timescaledb-ha:pg16
+    environment:
+      POSTGRES_USER: agrin
+      POSTGRES_PASSWORD: agrin
+      POSTGRES_DB: agrin
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agrin"]
+      interval: 5s
+      retries: 20
+
+  node-in:
+    build:
+      context: ../backend
+    environment:
+      AGRIN_ENV: dev
+      NODE_ID: node-in
+      NODE_COUNTRY: IN
+      DATABASE_URL: postgresql+asyncpg://agrin:agrin@db-in:5432/agrin
+      SECRET_KEY: demo-only-not-a-real-secret
+    depends_on:
+      db-in: { condition: service_healthy }
+    ports: ["8099:8000"]
+    command: >
+      sh -c "python -m app.db.migrate &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  node-br:
+    build:
+      context: ../backend
+    environment:
+      AGRIN_ENV: dev
+      NODE_ID: node-br
+      NODE_COUNTRY: BR
+      DATABASE_URL: postgresql+asyncpg://agrin:agrin@db-br:5432/agrin
+      SECRET_KEY: demo-only-not-a-real-secret
+    depends_on:
+      db-br: { condition: service_healthy }
+      node-in: { condition: service_started }
+    ports: ["8100:8000"]
+    command: >
+      sh -c "python -m app.db.migrate &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
