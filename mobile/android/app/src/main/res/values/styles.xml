@@ -1,0 +1,9 @@
+<resources>
+    <!-- Platform default TextInput background. The RN template references
+         @drawable/rn_edit_text_material, which only exists if that template
+         drawable is copied in too; the platform default is fine and one less
+         asset in the APK. -->
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:statusBarColor">#125C2A</item>
+    </style>
+</resources>

@@ -1,0 +1,11 @@
+node_modules/
+android/app/build/
+android/build/
+android/.gradle/
+*.keystore
+!debug.keystore
+src/assets/models/*.tflite
+android/local.properties
+android/.gradle/
+android/app/*.keystore
+!android/app/debug.keystore

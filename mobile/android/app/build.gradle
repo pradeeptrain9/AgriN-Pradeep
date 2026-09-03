@@ -1,0 +1,123 @@
+apply plugin: "com.android.application"
+apply plugin: "org.jetbrains.kotlin.android"
+apply plugin: "com.facebook.react"
+
+/**
+ * APK size is a feature here: the target is a cheap Android phone on a metered
+ * connection. Three levers do most of the work -- per-ABI splits, R8 with
+ * resource shrinking, and Hermes.
+ */
+react {
+}
+
+def enableProguardInReleaseBuilds = true
+def jscFlavor = 'org.webkit:android-jsc:+'
+
+android {
+    ndkVersion rootProject.ext.ndkVersion
+    buildToolsVersion rootProject.ext.buildToolsVersion
+    compileSdk rootProject.ext.compileSdkVersion
+
+    namespace "org.agrin.app"
+
+    defaultConfig {
+        applicationId "org.agrin.app"
+        minSdkVersion rootProject.ext.minSdkVersion   // 24, Android 7.0
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "0.1.0"
+        // Only the languages we actually ship; drops unused resources from
+        // AndroidX and Play Services.
+        resConfigs "en", "hi", "pa", "pt", "ru", "zh"
+    }
+
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+        release {
+            // Credentials are read from ~/.gradle/gradle.properties or the CI
+            // secret store. They are never committed: a keystore password in a
+            // repository is a signing-key compromise waiting to happen.
+            if (project.hasProperty('AGRIN_UPLOAD_STORE_FILE')) {
+                storeFile file(AGRIN_UPLOAD_STORE_FILE)
+                storePassword AGRIN_UPLOAD_STORE_PASSWORD
+                keyAlias AGRIN_UPLOAD_KEY_ALIAS
+                keyPassword AGRIN_UPLOAD_KEY_PASSWORD
+            }
+        }
+    }
+
+    splits {
+        abi {
+            // One APK per architecture instead of a universal binary carrying
+            // native code for all of them. Roughly halves the download.
+            enable true
+            reset()
+            include "armeabi-v7a", "arm64-v8a"
+            universalApk false
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            minifyEnabled enableProguardInReleaseBuilds
+            shrinkResources true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            // Fall back to debug signing only when no release credentials are
+            // present, so a fresh clone can still produce a runnable build. A
+            // real release must be signed with the release key.
+            signingConfig project.hasProperty('AGRIN_UPLOAD_STORE_FILE')
+                ? signingConfigs.release
+                : signingConfigs.debug
+        }
+    }
+
+    bundle {
+        // App Bundle splits: Play delivers only the ABI, density and language
+        // each device needs. This is the single biggest download-size lever --
+        // far larger than anything achievable inside a universal APK.
+        abi { enableSplit true }
+        density { enableSplit true }
+        language { enableSplit true }
+    }
+
+    packagingOptions {
+        // Debug symbols for native libs are large and useless in a release APK.
+        jniLibs {
+            useLegacyPackaging false
+            // libtensorflowlite_gpu_jni.so must NOT be excluded, even though we
+            // only ever request the CPU delegate. libVisionCameraTflite.so links
+            // against it, so stripping it makes dlopen fail at load time with
+            // UnsatisfiedLinkError and takes the whole app down:
+            //
+            //   dlopen failed: library "libtensorflowlite_gpu_jni.so" not found:
+            //   needed by libVisionCameraTflite.so
+            //
+            // The dependency is resolved at link time, not when a delegate is
+            // chosen. The 1.25 MB per ABI is not optional.
+        }
+    }
+}
+
+dependencies {
+    implementation("com.facebook.react:react-android")
+
+    if (hermesEnabled.toBoolean()) {
+        // Hermes: smaller bundle and faster cold start than JSC, which matters
+        // most on the low-end devices this app targets.
+        implementation("com.facebook.react:hermes-android")
+    } else {
+        implementation jscFlavor
+    }
+}
+
+// RN 0.74 applies autolinking here. autolinkLibrariesWithApp() inside the react
+// block is the 0.75+ form and does not exist on this version.
+apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle"); applyNativeModulesAppBuildGradle(project)

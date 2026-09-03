@@ -1,0 +1,63 @@
+{
+  "name": "AgriN",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "android": "react-native run-android",
+    "start": "react-native start",
+    "build:release": "cd android && ./gradlew assembleRelease",
+    "size": "ls -lh android/app/build/outputs/apk/release/*.apk",
+    "tsc": "tsc --noEmit",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@maplibre/maplibre-react-native": "^10.4.2",
+    "@op-engineering/op-sqlite": "^11.2.6",
+    "@react-native-async-storage/async-storage": "^1.23.0",
+    "@react-navigation/bottom-tabs": "^6.5.0",
+    "@react-navigation/native": "^6.1.0",
+    "@react-navigation/native-stack": "^6.9.0",
+    "@turf/area": "^7.1.0",
+    "@turf/boolean-clockwise": "^7.1.0",
+    "@turf/helpers": "^7.1.0",
+    "@turf/simplify": "^7.1.0",
+    "axios": "^1.7.0",
+    "i18next": "^23.15.0",
+    "jpeg-js": "^0.4.4",
+    "react": "18.2.0",
+    "react-i18next": "^15.0.0",
+    "react-native": "0.74.5",
+    "react-native-background-actions": "^4.0.1",
+    "react-native-device-info": "^13.0.0",
+    "react-native-fast-tflite": "^1.6.1",
+    "react-native-fs": "^2.20.0",
+    "react-native-geolocation-service": "^5.3.0",
+    "react-native-image-picker": "^7.1.2",
+    "react-native-safe-area-context": "^4.10.0",
+    "react-native-screens": "^3.31.0",
+    "zustand": "^4.5.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.0",
+    "@babel/preset-env": "^7.25.0",
+    "@babel/runtime": "^7.25.0",
+    "@react-native/babel-preset": "0.74.87",
+    "@react-native/metro-config": "0.74.87",
+    "@react-native/typescript-config": "0.74.87",
+    "@types/jest": "^29.5.12",
+    "@types/react": "^18.2.0",
+    "jest": "^29.7.0",
+    "react-test-renderer": "18.2.0",
+    "typescript": "^5.5.0"
+  },
+  "jest": {
+    "preset": "react-native",
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/android/"
+    ],
+    "setupFiles": [
+      "<rootDir>/jest.setup.js"
+    ]
+  }
+}
