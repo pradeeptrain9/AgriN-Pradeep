@@ -185,7 +185,12 @@ class TestClaudePath:
         client = StubClient([StubResponse(GOOD)])
         narrate(ADVISORY, lang="en", client=client)
         call = client.calls[0]
-        assert call["model"] == "claude-opus-5"
+        # Read it from settings rather than hardcoding: the point of this test
+        # is that the request honours configuration, and pinning a literal here
+        # just makes it fail whenever the default is deliberately changed.
+        from app.config import get_settings
+
+        assert call["model"] == get_settings().claude_narrate_model
         assert call["output_config"]["format"]["type"] == "json_schema"
         assert call["thinking"] == {"type": "adaptive"}
 

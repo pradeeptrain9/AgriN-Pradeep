@@ -122,9 +122,14 @@ async def readiness(db: AsyncSession = Depends(get_db)) -> dict:
                 "until the 1st. Raise LLM_MONTHLY_USD_CAP to resume sooner.",
             ))
         else:
+            # Name both models. They are independently overridable from .env,
+            # and a stale override there silently outranks the code default --
+            # which is how narration ran on the expensive model after the
+            # cheaper one had been chosen.
             checks.append(_check(
                 "cloud_diagnosis", "ok",
-                f"configured ({settings.claude_vision_model}), "
+                f"vision {settings.claude_vision_model}, "
+                f"narration {settings.claude_narrate_model}, "
                 f"${usd:.2f} of ${cap:.2f} used this month"))
 
     # --- districts drive aggregate grouping
