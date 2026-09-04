@@ -8,25 +8,36 @@
  * mean a stale APK could quietly bypass a tightened gate.
  */
 
-import React, { useState } from 'react';
-import { Alert, Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import {
+  Alert, Image, Pressable, ScrollView, StyleSheet, Text, View,
+} from 'react-native';
 import {
   launchCamera, launchImageLibrary, type PhotoQuality,
 } from 'react-native-image-picker';
 
 import { Button } from '../../components/Button';
 import { FeedbackPrompt } from '../../components/FeedbackPrompt';
-import { colors, radius, spacing, type } from '../../constants/theme';
-import { enqueue, saveDiagnosis } from '../../db';
+import { colors, radius, spacing, touch, type } from '../../constants/theme';
+import { enqueue, loadCrops, saveDiagnosis } from '../../db';
 import { useDeviceTier } from '../../hooks/useDeviceTier';
 import { classify } from '../../services/tflite';
 import { isOffline, readableError, submitDiagnosis } from '../../services/api';
 import type { Diagnosis, DiseasePrediction } from '../../types';
 
 export const ScanScreen: React.FC<{ route: any }> = ({ route }) => {
-  const cropCode: string = route.params?.cropCode ?? 'rice';
   const fieldId: string | null = route.params?.fieldId ?? null;
   const tier = useDeviceTier();
+
+  // Arriving from a field, the crop is known. Arriving from the home screen --
+  // a farmer with a leaf in their hand and no field mapped -- it has to be
+  // asked for. Defaulting it would be worse than asking: the coverage gate is
+  // scoped per crop, so checking a maize leaf as rice is exactly the case the
+  // gate exists to refuse, and it would instead answer confidently.
+  const [cropCode, setCropCode] = useState<string | null>(
+    route.params?.cropCode ?? null,
+  );
+  const crops = useMemo(() => loadCrops<{ code: string; label: string }>(), []);
 
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
@@ -53,7 +64,7 @@ export const ScanScreen: React.FC<{ route: any }> = ({ route }) => {
   };
 
   const analyse = async () => {
-    if (!imageUri) return;
+    if (!imageUri || !cropCode) return;
     setBusy(true);
     try {
       // Always call classify: it loads the model lazily on first use and
@@ -79,12 +90,56 @@ export const ScanScreen: React.FC<{ route: any }> = ({ route }) => {
     }
   };
 
+  if (!cropCode) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <Text style={styles.instructions}>
+          Which crop is this leaf from?
+        </Text>
+        <Text style={styles.cropHint}>
+          The check only knows the diseases of the crop you pick, and it will
+          say so rather than guess if it does not recognise what it sees.
+        </Text>
+
+        {crops.length === 0 ? (
+          <Text style={styles.cropHint}>
+            The crop list has not been downloaded yet. Connect to the internet
+            once and it will be kept on this phone.
+          </Text>
+        ) : null}
+
+        {crops.map((crop) => (
+          <Pressable
+            key={crop.code}
+            onPress={() => setCropCode(crop.code)}
+            accessibilityRole="button"
+            accessibilityLabel={crop.label}
+            style={styles.cropOption}
+          >
+            <Text style={styles.cropOptionText}>{crop.label}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.instructions}>
         Take a close photo of one affected leaf, in daylight, with the leaf filling
         most of the picture.
       </Text>
+
+      {/* Arrived without a field: show which crop is being checked, and let it
+          be corrected without leaving the screen. */}
+      {fieldId === null ? (
+        <Pressable onPress={() => setCropCode(null)} style={styles.cropChip}>
+          <Text style={styles.cropChipText}>
+            Checking a {crops.find((c) => c.code === cropCode)?.label ?? cropCode}
+            {' leaf \u00b7 change'}
+          </Text>
+        </Pressable>
+      ) : null}
 
       {imageUri ? (
         <Image source={{ uri: imageUri }} style={styles.preview} resizeMode="cover" />
@@ -194,6 +249,27 @@ const Result: React.FC<{ diagnosis: Diagnosis }> = ({ diagnosis }) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.md, paddingBottom: spacing.xl },
+  cropHint: { ...type.body, color: colors.textMuted, marginBottom: spacing.md },
+  cropOption: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    marginBottom: spacing.sm,
+    minHeight: touch.minTarget,
+    justifyContent: 'center',
+  },
+  cropOptionText: { ...type.body, color: colors.text },
+  cropChip: {
+    alignSelf: 'flex-start',
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surface,
+    marginBottom: spacing.md,
+  },
+  cropChipText: { ...type.label, color: colors.textMuted },
   instructions: { ...type.body, color: colors.textMuted, marginBottom: spacing.md },
   preview: { width: '100%', height: 260, borderRadius: radius.md, backgroundColor: colors.surface },
   placeholder: { alignItems: 'center', justifyContent: 'center' },

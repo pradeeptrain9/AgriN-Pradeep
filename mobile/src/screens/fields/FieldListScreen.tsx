@@ -114,6 +114,8 @@ export const FieldListScreen: React.FC<{ navigation: any }> = ({ navigation }) =
             <Text style={styles.emptyTitle}>No fields yet</Text>
             <Text style={styles.emptyBody}>
               Walk around the edge of a field and AgriN will map it for you.
+              {'\n\n'}
+              You do not have to map anything to check a leaf for disease.
             </Text>
           </View>
         }
@@ -121,6 +123,16 @@ export const FieldListScreen: React.FC<{ navigation: any }> = ({ navigation }) =
 
       <View style={styles.footer}>
         <Button label="Map a new field" icon="+" onPress={() => navigation.navigate('MapField')} />
+        {/* Checking a leaf needs nothing but the leaf. Requiring a mapped field
+            first put a boundary walk between a farmer holding a diseased plant
+            and the one answer the phone can give them on the spot, offline. */}
+        <View style={styles.footerSpacer} />
+        <Button
+          label="Check a leaf for disease"
+          icon="📷"
+          variant="secondary"
+          onPress={() => navigation.navigate('Scan', {})}
+        />
       </View>
     </View>
   );
@@ -154,5 +166,6 @@ const styles = StyleSheet.create({
   empty: { padding: spacing.xl, alignItems: 'center' },
   emptyTitle: { ...type.title, color: colors.text },
   emptyBody: { ...type.body, color: colors.textMuted, textAlign: 'center', marginTop: spacing.sm },
+  footerSpacer: { height: spacing.sm },
   footer: { padding: spacing.md, borderTopWidth: 1, borderTopColor: colors.border },
 });
