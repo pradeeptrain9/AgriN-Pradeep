@@ -39,6 +39,8 @@ output is validated so that every figure it prints also appears in the input.
 | Mobile app | **Complete loop verified on an emulator.** Sign in -> map field -> set crop -> advisory -> Soil Health Card -> scan. Signed release, MapLibre tiles, runtime node switching. Geometry (20/20), tile sizing (6/6), node URL (22/22) verified |
 | Scheduled ingest (`app/worker.py`) | Done. arq cron: weather daily, satellite every 3 days when stale, soil once per field. PU-capped |
 | Deployment runbook | Done. `docs/DEPLOYMENT.md` |
+| Deployable stack | Done, and **started end to end locally**: API, ingest worker, Postgres, Redis and Caddy for automatic TLS. Migrations apply on start, the API runs as a non-root user, and the database publishes no ports. A phone cannot reach a node without a certificate -- the client refuses cleartext to any real host -- so TLS is part of the stack, not an afterthought |
+| Diagnosis without a field | Done. Checking a leaf needs nothing but the leaf: reachable from the home screen with no fields mapped, and it asks which crop rather than assuming one -- the coverage gate is scoped per crop, so a maize leaf checked as rice is exactly what the gate exists to refuse |
 | SMS gateway | Done. Provider-agnostic (`twilio`, `webhook` for any aggregator, `console` for dev). Plain HTTP, no vendor SDK. Console gateway refuses to run outside development |
 | Pilot readiness | `GET /ready` grades every dependency by farmer-visible consequence. Protocol in `docs/PILOT.md` |
 | Farmer feedback / grievance | Done. Prompt sits under every advisory and diagnosis; harm reports never blocked, surfaced for human triage, corrections collected as ground truth |

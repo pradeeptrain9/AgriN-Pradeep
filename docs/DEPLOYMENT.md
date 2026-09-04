@@ -383,3 +383,87 @@ curl -H "Authorization: Bearer <token>" localhost:8099/quota
 Returns the month's Claude spend against the cap, this user's checks today, and
 the Copernicus processing units alongside. Per-call detail, including which
 feature spent it, is in the `llm_ledger` table.
+
+## 11. Deploying the node
+
+The app refuses plain HTTP to anything but a loopback address -- enforced twice,
+in the client and in Android's network security config -- so **a deployed node
+must have a real certificate**. There is no configuration that lets a phone talk
+to `http://203.0.113.10:8099`, and that is deliberate: farm data should not
+cross a village network in clear text.
+
+That leaves two useful paths.
+
+### A tunnel, for a field test today
+
+For trying the app on a real phone away from your desk, you do not need a server
+at all. A quick tunnel puts an HTTPS address in front of the node running on
+your own machine:
+
+```bash
+brew install cloudflared
+```
+
+```bash
+cloudflared tunnel --url http://localhost:8099
+```
+
+It prints a `https://<something>.trycloudflare.com` address. Enter that in the
+app under *Change*. No account, no cost, and it satisfies the certificate
+requirement because the tunnel terminates TLS.
+
+Two things to know: the address changes every time you restart it, and the
+tunnel is public while it runs -- anyone with the URL reaches your node. Use it
+for a test, not for a pilot, and stop it when you are done.
+
+### The real thing
+
+One machine, everything on it, TLS obtained automatically:
+
+```bash
+cp deploy/.env.prod.example deploy/.env.prod
+```
+
+Fill it in. `SECRET_KEY` and `POSTGRES_PASSWORD` must be generated, not invented:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Point your domain's A record at the machine **before** starting, then:
+
+```bash
+docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod up -d --build
+```
+
+Caddy obtains a Let's Encrypt certificate on first start, which needs ports 80
+and 443 reachable from the internet and DNS already resolving.
+
+What the production stack does differently from the development one, and why:
+
+| | Why |
+|---|---|
+| API and ingest worker are both containers | In development the worker is run by hand and therefore forgotten. This node ran for a day with no satellite ingest because of exactly that. |
+| Postgres and Redis publish no ports | They are reachable on the compose network and nowhere else. A database on the internet with the development password is the likeliest way this gets taken. |
+| Migrations run on API start | Forward-only and idempotent, so a fresh machine needs no manual step -- the step that gets skipped at 6am on a launch day. The worker waits for the API rather than racing it. |
+| The API runs as uid 10001, not root | It needs to read its own code and talk to Postgres. Nothing else. |
+| A distinct compose project name | Both files otherwise default to the directory name, and starting production recreates the development containers against production volumes. |
+
+Then check it from the machine itself:
+
+```bash
+curl -s https://<your domain>/ready | python3 -m json.tool
+```
+
+A fresh deployment reports **one blocker**: `sms_delivery — console gateway
+outside development`. That is correct. The console gateway refuses to run
+outside development, so nobody can sign in until a real SMS provider is
+configured (section 4). It is the launch blocker, and `/ready` is supposed to
+say so rather than let you discover it with farmers standing in front of you.
+
+Back up the database volume before enrolling anyone:
+
+```bash
+docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod \
+  exec -T db pg_dump -U agrin agrin | gzip > agrin-$(date +%F).sql.gz
+```

@@ -1,0 +1,106 @@
+# A whole node, on one machine.
+#
+#   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod up -d
+#
+# Differences from the development compose that matter:
+#
+#   * The API and the ingest worker are containers here. In development the API
+#     runs from a terminal and the worker is often simply forgotten -- which is
+#     how a node ran for a day with no satellite ingest and nobody noticed.
+#   * Postgres and Redis publish no ports. They are reachable on the compose
+#     network and nowhere else. A database open to the internet with the
+#     development password on it is the single most likely way this gets owned.
+#   * Caddy terminates TLS. This is not optional: the app refuses plain HTTP to
+#     anything but a loopback address, so a node without a certificate cannot be
+#     reached by a phone at all.
+
+# A distinct project name from the development compose. Both default to the
+# directory name otherwise, and starting this one then recreates the dev
+# containers against production volumes -- the dev database is not lost, but it
+# is silently swapped out from under a running session.
+name: agrin-prod
+
+services:
+  db:
+    image: timescale/timescaledb-ha:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+    volumes:
+      - pgdata:/home/postgres/pgdata/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ../backend
+    restart: unless-stopped
+    env_file: [.env.prod]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      # /health is liveness only. /ready grades the dependencies and is the one
+      # a human should read; it is deliberately not the container's healthcheck,
+      # because a node with no satellite credentials is degraded, not dead, and
+      # restarting it would fix nothing.
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health')\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  worker:
+    build:
+      context: ../backend
+    restart: unless-stopped
+    command: ["arq", "app.worker.WorkerSettings"]
+
+    env_file: [.env.prod]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      AGRIN_RUN_MIGRATIONS: "0"
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      api: {condition: service_healthy}
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      AGRIN_DOMAIN: ${AGRIN_DOMAIN:?set AGRIN_DOMAIN to the node's hostname}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on: [api]
+
+volumes:
+  pgdata:
+  redisdata:
+  caddydata:
+  caddyconfig:

@@ -21,3 +21,6 @@ media/
 training/runs/
 training/exports/
 .DS_Store
+
+# Filled-in production secrets. Only the .example is committed.
+deploy/.env.prod

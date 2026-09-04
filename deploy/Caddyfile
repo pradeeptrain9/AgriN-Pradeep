@@ -1,0 +1,28 @@
+# Automatic HTTPS. Caddy obtains and renews a Let's Encrypt certificate for
+# AGRIN_DOMAIN on its own, which is the whole reason it is here: the app refuses
+# plain HTTP to any real host, so a node without a valid certificate is a node
+# no phone can talk to.
+#
+# Requires: port 80 and 443 reachable from the internet, and AGRIN_DOMAIN's DNS
+# A record pointing at this machine BEFORE first start. Caddy proves control of
+# the name over port 80; if DNS is not in place yet it will fail and retry.
+
+{$AGRIN_DOMAIN} {
+	encode zstd gzip
+
+	# Leaf photographs are the largest thing a farmer uploads, and a slow rural
+	# connection needs room to finish sending one.
+	request_body {
+		max_size 12MB
+	}
+
+	reverse_proxy api:8000 {
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
