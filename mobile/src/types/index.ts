@@ -134,3 +134,11 @@ export interface Diagnosis {
 }
 
 export type DeviceTier = 'low' | 'high';
+
+/** A crop the node offers, as served by GET /crops and mirrored locally. */
+export interface CropOption {
+  code: string;
+  label: string;
+  season_days: number;
+  fixes_nitrogen: boolean;
+}

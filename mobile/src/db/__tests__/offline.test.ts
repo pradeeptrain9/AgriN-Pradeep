@@ -145,6 +145,40 @@ describe('outbox ordering', () => {
     expect(outboxCount()).toBe(1);
   });
 
+  it('carries the on-device predictions with a queued photo', () => {
+    // These were dropped: the variable holding them was scoped inside the try
+    // block and invisible to the offline branch that queues. The photo replayed
+    // with no predictions, the server gate had nothing to accept, and every
+    // offline diagnosis escalated to the paid cloud model -- silently, showing
+    // up only as a bill. The on-device model answers ~44% of photos for free,
+    // and offline photos were exactly the ones never getting that.
+    enqueue('diagnosis', {
+      crop_code: 'rice',
+      field_id: null,
+      predictions: [
+        { class_code: 'rice__blast', probability: 0.91 },
+        { class_code: 'rice__brown_spot', probability: 0.05 },
+      ],
+    }, '/tmp/leaf.jpg');
+
+    const item = pendingOutbox(5)[0]!;
+    expect(item.kind).toBe('diagnosis');
+    expect(item.filePath).toBe('/tmp/leaf.jpg');
+    expect(item.payload.predictions).toHaveLength(2);
+    expect(item.payload.predictions[0].class_code).toBe('rice__blast');
+    expect(item.payload.predictions[0].probability).toBeCloseTo(0.91);
+  });
+
+  it('queues a diagnosis that belongs to no field at all', () => {
+    // Checking a leaf needs nothing but the leaf, so a null field must survive
+    // the round trip rather than being dropped or coerced.
+    enqueue('diagnosis', { crop_code: 'rice', field_id: null, predictions: [] },
+      '/tmp/leaf.jpg');
+    const item = pendingOutbox(5)[0]!;
+    expect(item.payload.field_id).toBeNull();
+    expect(item.payload.crop_code).toBe('rice');
+  });
+
   it('accepts feedback, so a harm report is not lost to a dead signal', () => {
     enqueue('feedback', { kind: 'advisory', verdict: 'harmful', comment: 'lost the crop' });
     const item = pendingOutbox(5)[0]!;

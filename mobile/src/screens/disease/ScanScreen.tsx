@@ -8,7 +8,7 @@
  * mean a stale APK could quietly bypass a tightened gate.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert, Image, Pressable, ScrollView, StyleSheet, Text, View,
 } from 'react-native';
@@ -19,11 +19,11 @@ import {
 import { Button } from '../../components/Button';
 import { FeedbackPrompt } from '../../components/FeedbackPrompt';
 import { colors, radius, spacing, touch, type } from '../../constants/theme';
-import { enqueue, loadCrops, saveDiagnosis } from '../../db';
+import { enqueue, loadCrops, saveCrops, saveDiagnosis } from '../../db';
 import { useDeviceTier } from '../../hooks/useDeviceTier';
 import { classify } from '../../services/tflite';
-import { isOffline, readableError, submitDiagnosis } from '../../services/api';
-import type { Diagnosis, DiseasePrediction } from '../../types';
+import { isOffline, listCrops, readableError, submitDiagnosis } from '../../services/api';
+import type { CropOption, Diagnosis, DiseasePrediction } from '../../types';
 
 export const ScanScreen: React.FC<{ route: any }> = ({ route }) => {
   const fieldId: string | null = route.params?.fieldId ?? null;
@@ -37,7 +37,39 @@ export const ScanScreen: React.FC<{ route: any }> = ({ route }) => {
   const [cropCode, setCropCode] = useState<string | null>(
     route.params?.cropCode ?? null,
   );
-  const crops = useMemo(() => loadCrops<{ code: string; label: string }>(), []);
+  // The mirror is the first source, so this works with no signal. But it is
+  // only ever filled by the crop screen, which needs a field -- so a farmer who
+  // has mapped nothing and just wants a leaf checked would find it empty and be
+  // stuck. Fetch it here too when it is empty and there is a connection.
+  const [crops, setCrops] = useState<CropOption[]>(
+    () => loadCrops<CropOption>(),
+  );
+  const [cropsLoading, setCropsLoading] = useState(false);
+
+  useEffect(() => {
+    if (cropCode !== null) return;          // came from a field; crop is known
+    let cancelled = false;
+    const cached = loadCrops<CropOption>();
+    if (cached.length === 0) setCropsLoading(true);
+
+    listCrops()
+      .then((list) => {
+        saveCrops(list);
+        if (!cancelled) setCrops(list as CropOption[]);
+      })
+      .catch(() => {
+        // Offline with nothing mirrored is the one case with no way forward;
+        // the empty state below says so plainly rather than showing a blank
+        // list that looks broken.
+      })
+      .finally(() => {
+        if (!cancelled) setCropsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cropCode]);
 
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
@@ -66,12 +98,21 @@ export const ScanScreen: React.FC<{ route: any }> = ({ route }) => {
   const analyse = async () => {
     if (!imageUri || !cropCode) return;
     setBusy(true);
+
+    // Declared out here so the offline branch below can queue it. Scoped inside
+    // the try, it was invisible to the catch and every queued photo was sent
+    // with no predictions at all -- so the server gate saw nothing, could not
+    // accept the on-device answer, and escalated to the paid cloud model. The
+    // on-device model answers about 44% of photos for nothing, and offline
+    // photos were the ones never getting that.
+    let predictions: DiseasePrediction[] = [];
+
     try {
       // Always call classify: it loads the model lazily on first use and
       // returns an empty list if that fails. Guarding this with isModelLoaded()
       // was a deadlock -- the model only loads inside classify(), so the guard
       // was never true and the on-device path could never run at all.
-      const predictions: DiseasePrediction[] = await classify(imageUri, cropCode);
+      predictions = await classify(imageUri, cropCode);
 
       const result = await submitDiagnosis({
         cropCode, imageUri, fieldId, predictions,
@@ -80,7 +121,11 @@ export const ScanScreen: React.FC<{ route: any }> = ({ route }) => {
       setDiagnosis(result);
     } catch (error) {
       if (isOffline(error)) {
-        enqueue('diagnosis', { crop_code: cropCode, field_id: fieldId }, imageUri);
+        enqueue(
+          'diagnosis',
+          { crop_code: cropCode, field_id: fieldId, predictions },
+          imageUri,
+        );
         setQueued(true);
       } else {
         Alert.alert('Could not check the photo', readableError(error, 'Please try again.'));
@@ -101,10 +146,15 @@ export const ScanScreen: React.FC<{ route: any }> = ({ route }) => {
           say so rather than guess if it does not recognise what it sees.
         </Text>
 
-        {crops.length === 0 ? (
+        {cropsLoading ? (
+          <Text style={styles.cropHint}>Loading the crop list…</Text>
+        ) : null}
+
+        {!cropsLoading && crops.length === 0 ? (
           <Text style={styles.cropHint}>
-            The crop list has not been downloaded yet. Connect to the internet
-            once and it will be kept on this phone.
+            The crop list has not been downloaded yet and there is no internet
+            right now. Connect once and it will be kept on this phone, so this
+            works in the field afterwards.
           </Text>
         ) : null}
 

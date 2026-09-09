@@ -20,15 +20,9 @@ import {
 import { Button } from '../../components/Button';
 import { colors, radius, spacing, touch, type } from '../../constants/theme';
 import { enqueue, loadCrops, saveCrops } from '../../db';
+import type { CropOption } from '../../types';
 import { isOffline, listCrops, readableError, setCrop } from '../../services/api';
 import { useFieldStore } from '../../store/fieldSlice';
-
-interface CropOption {
-  code: string;
-  label: string;
-  season_days: number;
-  fixes_nitrogen: boolean;
-}
 
 const RELATIVE_CHOICES = [
   { label: 'Today', days: 0 },
