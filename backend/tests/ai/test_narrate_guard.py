@@ -22,3 +22,48 @@ def test_a_field_with_no_crop_never_calls_the_model():
 
     assert called == []
     assert result.source == "template"
+
+
+class TestNoCropScreen:
+    """Reached before the app has done anything for the farmer.
+
+    It must work with no model, no key and no network, and it must not be the
+    one screen that is English-only -- the farmer who cannot read it is the
+    farmer who never gets past it.
+    """
+
+    def test_every_indian_language_with_a_voice_has_the_strings(self):
+        from app.ai.narrate import NO_CROP_STRINGS
+        from app.providers.speech import LOCALES
+
+        for lang in LOCALES:
+            if lang == "en":
+                continue
+            assert lang in NO_CROP_STRINGS, (
+                f"{lang} has a text-to-speech voice but no no-crop wording, so "
+                "it would be read out in English"
+            )
+
+    def test_each_translation_is_complete(self):
+        from app.ai.narrate import NO_CROP_STRINGS
+
+        for lang, words in NO_CROP_STRINGS.items():
+            for key in ("summary", "title", "detail", "explanation"):
+                assert words.get(key), f"{lang} is missing {key}"
+
+    def test_translations_are_not_left_in_english(self):
+        from app.ai.narrate import NO_CROP_STRINGS
+
+        english = "No crop is recorded for this field yet."
+        for lang, words in NO_CROP_STRINGS.items():
+            assert words["summary"] != english, f"{lang} was never translated"
+            assert not words["summary"].isascii(), (
+                f"{lang} reads as ASCII, which means the placeholder is still there"
+            )
+
+    def test_an_unsupported_language_says_so_rather_than_guessing(self):
+        from app.ai.narrate import build_template_narration
+
+        result = build_template_narration({"status": "no_crop"}, lang="ru")
+        assert result.lang == "en"
+        assert result.translated is False

@@ -151,27 +151,88 @@ def _fmt(value, suffix: str = "") -> str:
     return f"{text}{suffix}"
 
 
-def build_template_narration(payload: dict) -> NarrationResult:
-    """Deterministic English narration. No model, no network, no API key."""
+
+# The one screen that must never depend on a model, a key or a network: the
+# field with no crop yet, where the only useful sentence is "tell me what you
+# sowed". Short-circuiting that to the template saved a paid call and took the
+# Hindi wording away with it, because the template is English and Cloud
+# Translation is optional. So the sentences are carried here.
+#
+# These are the only hand-written translations in the system, and they are the
+# only place a translation could be wrong without a test catching it. Every one
+# needs a native speaker's eye before a pilot -- the strings say nothing
+# quantitative, which is why they are safe to ship unreviewed and unsafe to
+# copy this pattern for anything that does.
+#
+# A language not listed falls back to English, which is honest: a half-guessed
+# instruction is worse than one the farmer can have read to them by someone.
+NO_CROP_STRINGS: dict[str, dict[str, str]] = {
+    "hi": {
+        "summary": "इस खेत के लिए अभी कोई फसल दर्ज नहीं है।",
+        "title": "अपनी फसल दर्ज करें",
+        "detail": "ऐप को बताएं कि आपने कौन सी फसल बोई और किस दिन बोई। "
+        "इसके बिना सलाह शुरू नहीं हो सकती।",
+        "explanation": "हर सिफ़ारिश फसल और बुवाई के बाद बीते दिनों पर निर्भर करती है।",
+    },
+    "pa": {
+        "summary": "ਇਸ ਖੇਤ ਲਈ ਹਾਲੇ ਕੋਈ ਫ਼ਸਲ ਦਰਜ ਨਹੀਂ ਹੈ।",
+        "title": "ਆਪਣੀ ਫ਼ਸਲ ਦਰਜ ਕਰੋ",
+        "detail": "ਐਪ ਨੂੰ ਦੱਸੋ ਕਿ ਤੁਸੀਂ ਕਿਹੜੀ ਫ਼ਸਲ ਬੀਜੀ ਅਤੇ ਕਿਸ ਦਿਨ ਬੀਜੀ। "
+        "ਇਸ ਤੋਂ ਬਿਨਾਂ ਸਲਾਹ ਸ਼ੁਰੂ ਨਹੀਂ ਹੋ ਸਕਦੀ।",
+        "explanation": "ਹਰ ਸਿਫ਼ਾਰਸ਼ ਫ਼ਸਲ ਅਤੇ ਬਿਜਾਈ ਤੋਂ ਬਾਅਦ ਦੇ ਦਿਨਾਂ ਉੱਤੇ ਨਿਰਭਰ ਕਰਦੀ ਹੈ।",
+    },
+    "bn": {
+        "summary": "এই জমির জন্য এখনও কোনও ফসল নথিভুক্ত করা হয়নি।",
+        "title": "আপনার ফসল যোগ করুন",
+        "detail": "অ্যাপকে জানান আপনি কোন ফসল বুনেছেন এবং কোন তারিখে বুনেছেন। "
+        "এটি ছাড়া পরামর্শ শুরু করা যায় না।",
+        "explanation": "প্রতিটি পরামর্শ ফসল এবং বোনার পর কত দিন হয়েছে তার উপর নির্ভর করে।",
+    },
+    "mr": {
+        "summary": "या शेतासाठी अद्याप कोणतेही पीक नोंदवलेले नाही.",
+        "title": "तुमचे पीक नोंदवा",
+        "detail": "तुम्ही कोणते पीक पेरले आणि कोणत्या दिवशी पेरले हे अ‍ॅपला सांगा. "
+        "याशिवाय सल्ला सुरू होऊ शकत नाही.",
+        "explanation": "प्रत्येक शिफारस पीक आणि पेरणीनंतर गेलेल्या दिवसांवर अवलंबून असते.",
+    },
+    "te": {
+        "summary": "ఈ పొలానికి ఇంకా ఏ పంటనూ నమోదు చేయలేదు.",
+        "title": "మీ పంటను నమోదు చేయండి",
+        "detail": "మీరు ఏ పంట వేశారో, ఏ రోజున వేశారో యాప్‌కు తెలియజేయండి. "
+        "ఇది లేకుండా సలహా ప్రారంభం కాదు.",
+        "explanation": "ప్రతి సిఫార్సు పంట మీద, విత్తిన తర్వాత గడిచిన రోజుల మీద ఆధారపడి ఉంటుంది.",
+    },
+}
+
+def build_template_narration(payload: dict, *, lang: str = "en") -> NarrationResult:
+    """Deterministic narration. No model, no network, no API key.
+
+    English except for the no-crop screen, which ships translated because it is
+    the one screen reached before anything else works.
+    """
     actions: list[dict] = []
     notes: list[str] = []
 
     if payload.get("status") == "no_crop":
+        words = NO_CROP_STRINGS.get(lang)
         return NarrationResult(
-            summary="No crop is recorded for this field yet.",
+            summary=words["summary"] if words
+            else "No crop is recorded for this field yet.",
             actions=[
                 {
-                    "title": "Add your crop",
-                    "detail": "Tell the app which crop you sowed and the date you "
+                    "title": words["title"] if words else "Add your crop",
+                    "detail": words["detail"] if words else
+                    "Tell the app which crop you sowed and the date you "
                     "sowed it. Advice cannot start without it.",
                     "urgency": "now",
                 }
             ],
-            explanation="Every recommendation depends on the crop and how many "
+            explanation=words["explanation"] if words
+            else "Every recommendation depends on the crop and how many "
             "days it has been growing.",
-            lang="en",
+            lang=lang if words else "en",
             source="template",
-            translated=True,
+            translated=bool(words) or lang == "en",
         )
 
     crop = payload.get("crop") or {}
@@ -463,7 +524,7 @@ def narrate(payload: dict, *, lang: str = "en", client=None) -> NarrationResult:
     # the screen they see *before* the app is useful to them, which is the
     # screen most likely to be opened and abandoned.
     if payload.get("status") == "no_crop":
-        return template
+        return build_template_narration(payload, lang=lang)
 
     # --- Gemini first.
     if client is None and gemini.available(settings):
