@@ -457,6 +457,14 @@ def narrate(payload: dict, *, lang: str = "en", client=None) -> NarrationResult:
     billed: list[object] = []
     template.usages = billed
 
+    # A field with no crop has nothing to narrate. The payload carries no
+    # figures, the template's answer is one fixed sentence asking for the crop,
+    # and a model cannot improve it -- so calling one bills a farmer's node for
+    # the screen they see *before* the app is useful to them, which is the
+    # screen most likely to be opened and abandoned.
+    if payload.get("status") == "no_crop":
+        return template
+
     # --- Gemini first.
     if client is None and gemini.available(settings):
         model = settings.gemini_narrate_model

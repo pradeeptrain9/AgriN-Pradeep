@@ -49,6 +49,8 @@ app.include_router(fields.router)
 app.include_router(diagnoses.router)
 app.include_router(advisory.router)
 app.include_router(federation.router)
+# RFC 8615: discovery lives at the origin root, not behind this node's prefix.
+app.include_router(federation.well_known)
 app.include_router(feedback.router)
 app.include_router(basemap.router)
 app.include_router(readiness.router)

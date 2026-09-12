@@ -29,6 +29,29 @@ REQUIRED_CARD_FIELDS = (
 )
 
 
+# What a peer is allowed to do with a published model, in a form a script can
+# read. The cards already said this in prose -- rice_disease_v1's intended_use
+# is literally "None at present" -- but prose is for the person deciding, and
+# the thing that pulls a model across a border is a program. Two artifacts of
+# identical size, one of them a failed run published so peers do not repeat it,
+# were being listed with nothing but a version string to tell them apart.
+STATUSES = frozenset({"deployable", "not_for_deployment", "card_only"})
+
+
+def status_of(card: dict, *, has_artifact: bool) -> str:
+    """The card's own declaration, or the safe reading of what it says."""
+    declared = card.get("status")
+    if declared in STATUSES:
+        return declared
+    if not has_artifact:
+        return "card_only"
+    # A card that names no intended use is not offering the model for use.
+    intended = str(card.get("intended_use") or "").strip().lower()
+    if not intended or intended.startswith("none"):
+        return "not_for_deployment"
+    return "deployable"
+
+
 @dataclass(frozen=True)
 class RegisteredModel:
     model_id: str
@@ -38,10 +61,15 @@ class RegisteredModel:
     sha256: str | None
     size_bytes: int | None
 
+    @property
+    def status(self) -> str:
+        return status_of(self.card, has_artifact=self.artifact_path is not None)
+
     def to_dict(self, *, include_card: bool = True) -> dict:
         payload = {
             "model_id": self.model_id,
             "version": self.version,
+            "status": self.status,
             "artifact": {
                 "available": self.artifact_path is not None,
                 "sha256": self.sha256,
@@ -77,6 +105,12 @@ def validate_card(card: dict) -> list[str]:
         )
     if not card.get("limitations"):
         problems.append("limitations must be non-empty: every model has them")
+    declared = card.get("status")
+    if declared is not None and declared not in STATUSES:
+        problems.append(
+            f"status must be one of {sorted(STATUSES)}, not {declared!r}: a peer "
+            "filters on this field before pulling weights"
+        )
     return problems
 
 

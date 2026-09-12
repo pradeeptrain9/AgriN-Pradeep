@@ -30,6 +30,13 @@ from app.federation.signing import seal
 
 router = APIRouter(prefix="/federation", tags=["federation"])
 
+# RFC 8615 puts well-known URIs at the origin root, and that is the whole point
+# of them: a peer that has only a hostname can discover the node without being
+# told this implementation's prefix first. Served at both paths -- the root one
+# is canonical and is what /conformance now requires; the prefixed one stays
+# because peers already pinned to it should not break on an upgrade.
+well_known = APIRouter(tags=["federation"])
+
 SPEC_VERSION = "agrin-core-1.0.0"
 MODELS_DIR = pathlib.Path("models")
 
@@ -38,6 +45,7 @@ def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
+@well_known.get("/.well-known/agrin-node")
 @router.get("/.well-known/agrin-node")
 async def node_descriptor(db: AsyncSession = Depends(get_db)) -> dict:
     """Discovery document. A peer reads this first to learn what it can ask for."""
@@ -101,8 +109,16 @@ async def list_models() -> dict:
 
 
 @router.get("/models/{model_id}/artifact")
-async def model_artifact(model_id: str):
-    """Serve the weights. The card is the contract; this is just the payload."""
+async def model_artifact(model_id: str, acknowledge_not_for_deployment: bool = False):
+    """Serve the weights. The card is the contract; this is just the payload.
+
+    A model the publishing node has marked `not_for_deployment` needs the
+    acknowledgement flag. Failed runs are published deliberately -- a peer that
+    can see the negative result does not spend a month reproducing it -- but
+    the thing pulling weights across a border is a script, and this registry
+    was listing a fit model and an unfit one at the same size with nothing
+    machine-readable between them. Opting in has to be an act, not an oversight.
+    """
     for model in registry.discover(MODELS_DIR):
         if model.model_id == model_id:
             if model.artifact_path is None:
@@ -111,6 +127,16 @@ async def model_artifact(model_id: str):
                     detail=(
                         f"Model '{model_id}' is published as a card only; its weights "
                         "have not been trained yet."
+                    ),
+                )
+            if model.status == "not_for_deployment" and not acknowledge_not_for_deployment:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Model '{model_id}' is published as a negative result and is "
+                        "not fit for farmer-facing diagnosis. Read its card, then "
+                        "retry with acknowledge_not_for_deployment=true if you want "
+                        "it for research or comparison."
                     ),
                 )
             return FileResponse(
@@ -215,7 +241,9 @@ async def conformance() -> dict:
     return {
         "spec_version": SPEC_VERSION,
         "required_endpoints": [
-            {"path": "/federation/.well-known/agrin-node", "method": "GET"},
+            {"path": "/.well-known/agrin-node", "method": "GET"},
+            {"path": "/federation/.well-known/agrin-node", "method": "GET",
+             "note": "deprecated alias; RFC 8615 puts this at the origin root"},
             {"path": "/federation/vocabulary", "method": "GET"},
             {"path": "/federation/models", "method": "GET"},
             {"path": "/federation/aggregates", "method": "GET"},

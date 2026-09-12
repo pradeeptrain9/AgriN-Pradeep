@@ -50,5 +50,6 @@
     "dropout": 0.3,
     "label_smoothing": 0.1
   },
-  "version": "0-untrained"
+  "version": "0-untrained",
+  "status": "card_only"
 }

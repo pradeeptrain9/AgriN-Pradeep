@@ -1,6 +1,7 @@
 {
   "name": "rice_disease_v1",
   "version": "1-not-for-deployment",
+  "status": "not_for_deployment",
   "task": "rice leaf disease classification",
   "architecture": "MobileNetV3-Small, dynamic-range quantised TFLite",
   "input": {

@@ -87,3 +87,98 @@ class TestLoading:
 
     def test_discover_on_missing_directory_is_empty_not_an_error(self, tmp_path):
         assert discover(tmp_path / "nope") == []
+
+
+class TestPublishedStatus:
+    """A peer pulling weights is a script, not a person reading prose.
+
+    This registry was listing a fit rice model and a failed run of the same
+    architecture at identical size, distinguished only by the words in their
+    cards. Negative results are worth publishing -- a peer that sees one does
+    not spend a month reproducing it -- but adopting one has to be deliberate.
+    """
+
+    def test_a_card_with_no_intended_use_is_not_offered_for_deployment(self):
+        from app.federation.registry import status_of
+
+        card = {"intended_use": "None at present. Published as a negative result."}
+        assert status_of(card, has_artifact=True) == "not_for_deployment"
+
+    def test_a_card_without_weights_is_card_only(self):
+        from app.federation.registry import status_of
+
+        assert status_of({"intended_use": "Screening"}, has_artifact=False) == "card_only"
+
+    def test_an_explicit_status_wins_over_the_derivation(self):
+        from app.federation.registry import status_of
+
+        card = {"status": "not_for_deployment", "intended_use": "Screening"}
+        assert status_of(card, has_artifact=True) == "not_for_deployment"
+
+    def test_an_unknown_status_is_rejected_rather_than_published(self):
+        from app.federation.registry import validate_card
+
+        card = {"status": "probably_fine"}
+        problems = validate_card(card)
+        assert any("status must be one of" in p for p in problems)
+
+    def test_every_shipped_card_declares_a_status(self):
+        import pathlib
+
+        from app.federation import registry
+
+        models = registry.discover(pathlib.Path("models"))
+        assert models, "no model cards found"
+        for model in models:
+            assert model.status in registry.STATUSES
+            assert model.to_dict()["status"] == model.status
+
+    def test_the_shipped_rice_model_is_the_deployable_one(self):
+        import pathlib
+
+        from app.federation import registry
+
+        by_id = {m.model_id: m for m in registry.discover(pathlib.Path("models"))}
+        assert by_id["rice_disease"].status == "deployable"
+        assert by_id["rice_disease_v1"].status == "not_for_deployment"
+
+
+class TestDiscoveryPath:
+    """RFC 8615 puts well-known URIs at the origin root.
+
+    A peer that has been given only a hostname has to be able to discover the
+    node without also being told this implementation's route prefix. Served
+    behind /federation it was undiscoverable to anyone who did not already know
+    how AgriN is wired, which is the opposite of what the document is for.
+    """
+
+    def test_the_descriptor_is_served_from_the_origin_root(self):
+        from app.main import app
+
+        paths = {getattr(route, "path", "") for route in app.routes}
+        assert "/.well-known/agrin-node" in paths
+
+    def test_the_prefixed_path_still_answers_for_peers_already_pinned_to_it(self):
+        from app.main import app
+
+        paths = {getattr(route, "path", "") for route in app.routes}
+        assert "/federation/.well-known/agrin-node" in paths
+
+    def test_conformance_requires_the_root_path(self):
+        import inspect
+
+        from app.api import federation
+
+        source = inspect.getsource(federation.conformance)
+        assert '"/.well-known/agrin-node"' in source
+
+
+class TestArtifactPull:
+    def test_an_unfit_model_needs_an_explicit_acknowledgement(self):
+        import inspect
+
+        from app.api import federation
+
+        source = inspect.getsource(federation.model_artifact)
+        assert "acknowledge_not_for_deployment" in source
+        assert "status_code=409" in source
