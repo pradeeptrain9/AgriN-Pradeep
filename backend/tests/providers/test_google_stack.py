@@ -236,3 +236,68 @@ class TestBigQueryExportsOnlyWhatIsAlreadyPublic:
                 self.ENVELOPE, project="p", dataset="d", table="t",
                 credentials_path="/nonexistent",
             )
+
+
+class TestGeminiSchemaDialect:
+    """Every schema this node sends must survive Gemini's OpenAPI subset.
+
+    These matter more than they look. Both vision call sites treat a 400 as
+    "the cloud could not be reached", so a schema keyword Gemini rejects does
+    not surface as a bug -- it surfaces as an outage that never ends, on the
+    half of photographs the on-device model already refused.
+    """
+
+    def _schemas(self):
+        from app.ai.narrate import NARRATION_SCHEMA
+        from app.ai.vision import _open_ended_schema, _schema
+
+        return {
+            "vision": _schema("rice"),
+            "open_ended": _open_ended_schema(),
+            "narration": NARRATION_SCHEMA,
+        }
+
+    def test_no_schema_carries_a_type_union(self):
+        # JSON Schema writes an optional field as ["string", "null"].
+        # Gemini has no type union and 400s the whole request.
+        import json
+
+        from app.ai.gemini import sanitise_schema
+
+        for name, schema in self._schemas().items():
+            text = json.dumps(sanitise_schema(schema))
+            assert '"type": [' not in text, f"{name} still sends a type array"
+
+    def test_an_optional_field_becomes_nullable(self):
+        from app.ai.gemini import sanitise_schema
+        from app.ai.vision import _schema
+
+        field = sanitise_schema(_schema("rice"))["properties"]["image_quality_issue"]
+        assert field == {"type": "string", "nullable": True}
+
+    def test_unsupported_keywords_are_stripped(self):
+        import json
+
+        from app.ai.gemini import sanitise_schema
+
+        for name, schema in self._schemas().items():
+            text = json.dumps(sanitise_schema(schema))
+            for keyword in ("additionalProperties", "$schema", "patternProperties"):
+                assert keyword not in text, f"{name} still sends {keyword}"
+
+    def test_the_enum_survives_sanitising(self):
+        # The closed disease enum is what stops the model inventing a disease
+        # name. Stripping it while cleaning the schema would quietly remove
+        # that constraint.
+        from app.ai.gemini import sanitise_schema
+        from app.ai.vision import _schema
+
+        codes = sanitise_schema(_schema("rice"))["properties"]["disease_code"]["enum"]
+        assert "rice__blast" in codes and "unknown" in codes
+        assert not any(c.startswith("potato__") for c in codes)
+
+    def test_required_fields_survive(self):
+        from app.ai.gemini import sanitise_schema
+        from app.ai.vision import _schema
+
+        assert "disease_code" in sanitise_schema(_schema("rice"))["required"]

@@ -111,11 +111,23 @@ def sanitise_schema(schema: Any) -> Any:
     runs on the parsed result regardless of how well the schema was honoured.
     """
     if isinstance(schema, dict):
-        return {
+        out = {
             key: sanitise_schema(value)
             for key, value in schema.items()
             if key not in _UNSUPPORTED_SCHEMA_KEYS
         }
+        # JSON Schema spells an optional field as `"type": ["string", "null"]`.
+        # Gemini's dialect has no type union and rejects the array, which is a
+        # 400 for the whole request -- and both vision call sites read a 400 as
+        # "the cloud is unavailable", so the feature would fail silently and
+        # look like an outage. Rewritten to the `nullable` form it does accept.
+        kind = out.get("type")
+        if isinstance(kind, list):
+            concrete = [t for t in kind if t != "null"]
+            out["type"] = concrete[0] if concrete else "string"
+            if len(concrete) != len(kind):
+                out["nullable"] = True
+        return out
     if isinstance(schema, list):
         return [sanitise_schema(item) for item in schema]
     return schema
