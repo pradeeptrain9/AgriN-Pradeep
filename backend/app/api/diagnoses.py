@@ -211,6 +211,17 @@ async def create_diagnosis(
     # and only then assemble the diagnosis. Attaching chemicals afterwards would
     # leave the "no chemical treatment is shown" note sitting next to a chemical.
     extra_notes: list[str] = []
+    # Bound before the branch, because only the escalation path assigns it and
+    # the assembly below reads it either way. Written as `identification.x if
+    # identification else None` this looked safe and was not: the guard tests a
+    # name that does not exist yet on the accepted path, so Python raises
+    # UnboundLocalError before the condition is ever evaluated.
+    #
+    # The failure lands on the *best* outcome available -- the on-device model
+    # answered confidently, for free, offline -- and turns it into a 500. The
+    # farmer sees "could not check the photo" for the one photograph the node
+    # handled perfectly.
+    identification: VisionIdentification | None = None
     if decision.accepted and decision.top_class:
         disease = get_disease(decision.top_class)
         confidence = decision.top_probability
