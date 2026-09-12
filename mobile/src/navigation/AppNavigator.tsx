@@ -12,6 +12,7 @@ import { ScanScreen } from '../screens/disease/ScanScreen';
 import { CropScreen } from '../screens/fields/CropScreen';
 import { FieldDetailScreen } from '../screens/fields/FieldDetailScreen';
 import { FieldListScreen } from '../screens/fields/FieldListScreen';
+import { CropSuggestionScreen } from '../screens/fields/CropSuggestionScreen';
 import { MapFieldScreen } from '../screens/fields/MapFieldScreen';
 import { SoilCardScreen } from '../screens/fields/SoilCardScreen';
 import { SettingsScreen } from '../screens/settings/SettingsScreen';
@@ -103,6 +104,11 @@ export const AppNavigator: React.FC = () => {
             />
             <Stack.Screen
               name="Settings" component={SettingsScreen} options={{ title: 'Settings' }}
+            />
+            <Stack.Screen
+              name="CropSuggestion"
+              component={CropSuggestionScreen}
+              options={{ title: 'What to grow' }}
             />
             <Stack.Screen
               name="MapField" component={MapFieldScreen} options={{ title: 'Map a field' }}

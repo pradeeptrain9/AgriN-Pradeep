@@ -53,6 +53,15 @@ CREATE TABLE IF NOT EXISTS diagnoses (
   created_at INTEGER NOT NULL
 );
 
+-- Weather, mirrored per field. The irrigation advice leans on these numbers,
+-- so a farmer standing in a field with no signal should still be able to see
+-- what it was based on.
+CREATE TABLE IF NOT EXISTS weather (
+  field_id TEXT PRIMARY KEY,
+  payload TEXT NOT NULL,
+  fetched_at INTEGER NOT NULL
+);
+
 -- The crop registry, mirrored so a field walked with no signal can still be
 -- given a crop. It is small, static reference data -- fourteen rows that change
 -- when the node operator adds a crop, not per farmer -- and without it the
@@ -251,6 +260,35 @@ export const loadCrops = <T,>(): T[] => {
   return (rows ?? [])
     .map((row: any) => parse<T>(row.payload))
     .filter((crop): crop is T => crop !== null);
+};
+
+// ------------------------------------------------------------------ weather
+export const saveWeather = (fieldId: string, payload: unknown): void => {
+  conn().executeSync(
+    'INSERT INTO weather (field_id, payload, fetched_at) VALUES (?, ?, ?) '
+    + 'ON CONFLICT(field_id) DO UPDATE SET payload = excluded.payload, '
+    + 'fetched_at = excluded.fetched_at',
+    [fieldId, JSON.stringify(payload), Date.now()],
+  );
+};
+
+export interface CachedWeather<T> {
+  payload: T;
+  ageHours: number;
+}
+
+export const loadWeather = <T,>(fieldId: string): CachedWeather<T> | null => {
+  const { rows } = conn().executeSync(
+    'SELECT payload, fetched_at FROM weather WHERE field_id = ?', [fieldId],
+  );
+  const row = rows?.[0] as any;
+  if (!row) return null;
+  const payload = parse<T>(row.payload);
+  if (payload === null) return null;
+  return {
+    payload,
+    ageHours: (Date.now() - Number(row.fetched_at)) / 3_600_000,
+  };
 };
 
 // --------------------------------------------------------------- advisories

@@ -1,6 +1,7 @@
 """Advisory and ingest endpoints."""
 
 import json
+from datetime import date, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -16,6 +17,11 @@ from app.services.advisory import build_advisory
 from app.services.ingest import ingest_satellite, ingest_soil, ingest_weather, month_pu_spent
 
 router = APIRouter(tags=["advisory"])
+
+
+def _round(value, places: int):
+    """None stays None. A missing reading must not render as 0.0."""
+    return None if value is None else round(float(value), places)
 
 
 def _narrate_model() -> str:
@@ -183,6 +189,88 @@ async def get_narrated_advisory(
     return {"advisory": payload, "narration": rendered}
 
 
+@router.get("/fields/{field_id}/weather")
+async def field_weather(
+    field_id: str,
+    days: int = 7,
+    user: CurrentUser = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Daily weather for one field: a little history, then the forecast.
+
+    Deliberately NOT part of the advisory payload. Two reasons, both concrete:
+    ai/guard.py would start policing every one of these figures in narration,
+    and the narration cache keys on a hash of the advisory -- daily weather
+    changes on every refresh, so folding it in would turn a free cached
+    narration into a paid call each time.
+
+    weather_daily holds observations and forecast in the same table, so each
+    row says which it is. A farmer must never be shown a forecast as though it
+    had been measured.
+    """
+    await _load_field(db, field_id, user.user_id)
+
+    days = max(1, min(days, 16))
+    rows = await db.execute(
+        text(
+            "SELECT time::date AS day, tmax_c, tmin_c, precip_mm, et0_mm "
+            "FROM weather_daily "
+            "WHERE field_id = :id "
+            "  AND time >= CURRENT_DATE - INTERVAL '2 days' "
+            "  AND time <= CURRENT_DATE + make_interval(days => :days) "
+            "ORDER BY time"
+        ),
+        {"id": field_id, "days": days},
+    )
+
+    today = date.today()
+    daily = []
+    for row in rows.mappings():
+        day = row["day"]
+        daily.append({
+            "day": day.isoformat(),
+            "kind": "observed" if day <= today else "forecast",
+            "tmax_c": _round(row["tmax_c"], 1),
+            "tmin_c": _round(row["tmin_c"], 1),
+            "precip_mm": _round(row["precip_mm"], 1),
+            "et0_mm": _round(row["et0_mm"], 2),
+        })
+
+    forecast = [d for d in daily if d["kind"] == "forecast"]
+    return {
+        "field_id": field_id,
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "daily": daily,
+        "rain_ahead_mm": round(
+            sum(d["precip_mm"] or 0.0 for d in forecast), 1
+        ),
+        "forecast_days": len(forecast),
+        "gaps": (
+            [] if daily
+            else ["No weather for this field yet. Tap Update from satellite."]
+        ),
+    }
+
+
+@router.get("/fields/{field_id}/crop-suggestions")
+async def crop_suggestions(
+    field_id: str,
+    user: CurrentUser = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """What could be grown here, ranked, with the reasoning attached.
+
+    Deliberately a separate route from the advisory: the advisory needs a crop
+    and a sowing date to say anything, and this is the question a farmer has
+    before either exists.
+    """
+    from app.services.crop_choice import suggest_crops
+
+    field = await _load_field(db, field_id, user.user_id)
+    field = await _attach_crop_and_soil(db, field)
+    return await suggest_crops(db, field=field)
+
+
 @router.get("/quota")
 async def quota(
     user: CurrentUser = Depends(current_user), db: AsyncSession = Depends(get_db)
@@ -210,12 +298,21 @@ async def quota(
 
 @router.get("/crops")
 async def crops() -> list[dict]:
+    from app.ai.disease_taxonomy import classes_for_crop
     from app.engine.crops import list_crops
 
     return [
         {
             "code": c.code,
             "label": c.label_en,
+            # Every crop can now be photographed: one with no verified disease
+            # list goes down the open-ended path and comes back with a name.
+            "diagnosable": True,
+            # ...but only a crop with a verified list can be given treatment
+            # advice, because IPM actions and the pesticide allowlist are both
+            # keyed on a disease_code. The client uses this to set expectations
+            # BEFORE the photo is taken, rather than after.
+            "treatment_available": len(classes_for_crop(c.code)) > 0,
             "season_days": c.season_days,
             "stages": {
                 "initial": c.stage_days[0],

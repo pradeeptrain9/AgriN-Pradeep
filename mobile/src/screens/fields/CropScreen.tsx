@@ -47,7 +47,12 @@ export const CropScreen: React.FC<{ route: any; navigation: any }> = ({ route, n
 
   const [crops, setCrops] = useState<CropOption[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<string | null>(null);
+  // Arriving from a suggestion, the crop is already chosen -- so the farmer
+  // lands on the sowing date rather than hunting the list for the name they
+  // just tapped. Still changeable: the suggestion was a suggestion.
+  const [selected, setSelected] = useState<string | null>(
+    route.params?.preselect ?? null,
+  );
   const [previous, setPrevious] = useState<string | null>(null);
   const [sowing, setSowing] = useState(isoDaysAgo(14));
   const [choice, setChoice] = useState(14);

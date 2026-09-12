@@ -141,4 +141,52 @@ export interface CropOption {
   label: string;
   season_days: number;
   fixes_nitrogen: boolean;
+  /** Whether a leaf photograph of this crop can be diagnosed at all. */
+  diagnosable?: boolean;
+}
+
+/** One day of weather for a field. `kind` says measured or predicted. */
+export interface WeatherDay {
+  day: string;
+  kind: 'observed' | 'forecast';
+  tmax_c: number | null;
+  tmin_c: number | null;
+  precip_mm: number | null;
+  et0_mm: number | null;
+}
+
+export interface FieldWeather {
+  field_id: string;
+  generated_at: string;
+  daily: WeatherDay[];
+  rain_ahead_mm: number;
+  forecast_days: number;
+  gaps: string[];
+}
+
+/** One candidate crop, with the reasoning that produced its rank. */
+export interface CropSuggestion {
+  crop_code: string;
+  label: string;
+  score: number;
+  components: Record<string, number>;
+  seasonal_water_need_mm: number;
+  reasons: string[];
+  warnings: string[];
+}
+
+export interface CropSuggestions {
+  version: string;
+  field_id: string;
+  generated_at: string;
+  based_on: {
+    rainfall_last_180d_mm: number;
+    mean_et0_mm_day: number;
+    weather_days: number;
+    previous_crop: string | null;
+    soil_source: string | null;
+  };
+  suggestions: CropSuggestion[];
+  choice_is_open: boolean;
+  gaps: string[];
 }

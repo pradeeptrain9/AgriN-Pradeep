@@ -10,7 +10,9 @@ import axios, { AxiosError } from 'axios';
 
 import { useAuthStore } from '../store/authSlice';
 import { currentNodeUrl } from './node';
-import type { Advisory, Diagnosis, Field, GeoJsonPolygon, Narration } from '../types';
+import type {
+  Advisory, CropSuggestions, Diagnosis, Field, FieldWeather, GeoJsonPolygon, Narration,
+} from '../types';
 
 export const api = axios.create({
   timeout: 30000,
@@ -155,4 +157,16 @@ export const submitFeedback = async (body: {
 }) => {
   const { data } = await api.post('/feedback', body);
   return data as { id: string; escalated: boolean; message: string };
+};
+
+export const getFieldWeather = async (fieldId: string, days = 7) => {
+  const { data } = await api.get(`/fields/${fieldId}/weather`, {
+    params: { days },
+  });
+  return data as FieldWeather;
+};
+
+export const getCropSuggestions = async (fieldId: string) => {
+  const { data } = await api.get(`/fields/${fieldId}/crop-suggestions`);
+  return data as CropSuggestions;
 };

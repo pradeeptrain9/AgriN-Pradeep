@@ -13,15 +13,20 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Button } from '../../components/Button';
 import { FeedbackPrompt } from '../../components/FeedbackPrompt';
+import { WeatherCard } from '../../components/WeatherCard';
 import { FieldMapView } from '../../components/map/FieldMapView';
 import { FieldPolygon } from '../../components/map/FieldPolygon';
 import { StatusPill } from '../../components/StatusPill';
 import { colors, radius, spacing, type } from '../../constants/theme';
-import { isLocalId, loadAdvisory, loadFields, saveAdvisory } from '../../db';
+import {
+  isLocalId, loadAdvisory, loadFields, loadWeather, saveAdvisory, saveWeather,
+} from '../../db';
 import { boundsFor } from '../../services/offlineTiles';
-import { getNarratedAdvisory, isOffline, refreshField } from '../../services/api';
+import {
+  getFieldWeather, getNarratedAdvisory, isOffline, refreshField,
+} from '../../services/api';
 import { useAuthStore } from '../../store/authSlice';
-import type { Advisory, Narration } from '../../types';
+import type { Advisory, FieldWeather, Narration } from '../../types';
 
 export const FieldDetailScreen: React.FC<{ route: any; navigation: any }> = ({
   route, navigation,
@@ -37,6 +42,30 @@ export const FieldDetailScreen: React.FC<{ route: any; navigation: any }> = ({
   const [field, setField] = useState(
     () => loadFields().find((f) => f.id === fieldId) ?? null,
   );
+
+  const [weather, setWeather] = useState<FieldWeather | null>(null);
+  const [weatherAge, setWeatherAge] = useState<number | null>(null);
+
+  const refreshWeather = useCallback(async () => {
+    if (isLocalId(fieldId)) return;      // not on the node yet
+
+    // Paint from the mirror first so the card is there instantly and survives
+    // a dead signal, then reconcile.
+    const cached = loadWeather<FieldWeather>(fieldId);
+    if (cached) {
+      setWeather(cached.payload);
+      setWeatherAge(cached.ageHours);
+    }
+
+    try {
+      const fresh = await getFieldWeather(fieldId, 7);
+      setWeather(fresh);
+      setWeatherAge(0);
+      saveWeather(fieldId, fresh);
+    } catch {
+      // Keep whatever the mirror gave us; the card labels its own age.
+    }
+  }, [fieldId]);
 
   const load = useCallback(async () => {
     // A field mapped offline has no id the node would recognise, so asking for
@@ -70,7 +99,8 @@ export const FieldDetailScreen: React.FC<{ route: any; navigation: any }> = ({
     useCallback(() => {
       setField(loadFields().find((f) => f.id === fieldId) ?? null);
       load();
-    }, [fieldId, load]),
+      refreshWeather();
+    }, [fieldId, load, refreshWeather]),
   );
 
   const requestRefresh = async () => {
@@ -119,15 +149,26 @@ export const FieldDetailScreen: React.FC<{ route: any; navigation: any }> = ({
   if (advisory.status === 'no_crop') {
     return (
       <View style={styles.centered}>
-        <Text style={styles.headline}>Tell us what you are growing</Text>
+        <Text style={styles.headline}>What are you growing?</Text>
         <Text style={styles.body}>
-          Advice depends on the crop and how many days it has been growing, so we
-          cannot say anything useful yet.
+          Advice depends on the crop and how many days it has been growing, so
+          we cannot say anything useful yet.
+          {'\n\n'}
+          If the field is empty, we can suggest what suits it — based on the
+          rain it actually gets and what grew here last season.
         </Text>
         <View style={{ height: spacing.lg }} />
+        {/* The suggestion leads, because a farmer standing on a bare field is
+            more often deciding than recording. Both routes end at the same
+            crop screen. */}
         <Button
-          label="Add your crop"
-          icon="+"
+          label="Suggest what to grow"
+          onPress={() => navigation.navigate('CropSuggestion', { fieldId })}
+        />
+        <View style={{ height: spacing.sm }} />
+        <Button
+          label="I know my crop"
+          variant="secondary"
           onPress={() => navigation.navigate('Crop', { fieldId })}
         />
       </View>
@@ -211,6 +252,16 @@ export const FieldDetailScreen: React.FC<{ route: any; navigation: any }> = ({
           <Text key={i} style={styles.note}>• {note}</Text>
         ))}
       </Section>
+
+      {/* Above Water on purpose: the irrigation advice below is computed from
+          these numbers, and a farmer told "no watering needed" deserves to see
+          the rain it is counting on. */}
+      <WeatherCard
+        daily={weather?.daily ?? []}
+        rainAheadMm={weather?.rain_ahead_mm ?? 0}
+        ageHours={weatherAge}
+        gaps={weather?.gaps}
+      />
 
       {irrigation ? (
         <Section title="Water">
