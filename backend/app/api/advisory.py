@@ -83,20 +83,40 @@ async def _store_narration(
 
 
 async def _refresh_field(field_id: str, lat: float, lon: float, geometry: dict) -> None:
-    """Background refresh. Failures are logged, never surfaced mid-request."""
+    """Background refresh. Failures are logged, never surfaced mid-request.
+
+    Each source is independent and each catches broadly, because the three
+    have nothing to do with one another: soil is SoilGrids, weather is
+    Open-Meteo, satellite is Copernicus. Catching only each provider's own
+    exception type looked tidier and was wrong -- anything else weather could
+    raise (an httpx timeout, a DNS failure, a database error) escaped the
+    handler, killed the task, and took satellite down with it. The symptom is
+    the worst kind: a farmer taps Update, gets no error because this runs in
+    the background, and the node ends up with no weather AND no satellite,
+    with nothing to say which one actually broke.
+
+    The exception type is logged alongside the message. `except
+    WeatherUnavailable` at least named its own failure; a bare message from an
+    arbitrary exception often does not.
+    """
     async with SessionLocal() as db:
-        try:
-            await ingest_soil(db, field_id, lat, lon)
-        except Exception as exc:  # noqa: BLE001 - background task must not die
-            print(f"[ingest] soil failed for {field_id}: {exc}")
-        try:
-            await ingest_weather(db, field_id, lat, lon)
-        except WeatherUnavailable as exc:
-            print(f"[ingest] weather failed for {field_id}: {exc}")
-        try:
-            await ingest_satellite(db, field_id, geometry)
-        except (SentinelUnavailable, ProcessingUnitCapReached) as exc:
-            print(f"[ingest] satellite skipped for {field_id}: {exc}")
+        for label, coro in (
+            ("soil", ingest_soil(db, field_id, lat, lon)),
+            ("weather", ingest_weather(db, field_id, lat, lon)),
+            ("satellite", ingest_satellite(db, field_id, geometry)),
+        ):
+            try:
+                await coro
+                print(f"[ingest] {label} ok for {field_id}")
+            except (
+                WeatherUnavailable, SentinelUnavailable, ProcessingUnitCapReached
+            ) as exc:
+                # Expected and survivable: upstream is down, or the monthly
+                # Copernicus budget is spent. Not a fault in this node.
+                print(f"[ingest] {label} unavailable for {field_id}: {exc}")
+            except Exception as exc:  # noqa: BLE001 - one source must not stop the rest
+                print(f"[ingest] {label} FAILED for {field_id}: "
+                      f"{type(exc).__name__}: {exc}")
 
 
 @router.post("/fields/{field_id}/refresh", status_code=202)
