@@ -381,6 +381,10 @@
       <p style="margin-top:12px;">Standards are boring on purpose — AGROVOC crop
       concepts, UCUM units, GeoJSON RFC 7946, OpenAPI 3.1 — so a second
       implementation can interoperate without asking us.</p>
+      <p style="margin-top:12px;"><strong>Live, not planned.</strong> The running
+      node declares itself <code>IN-MH</code> at <code>/.well-known/agrin-node</code>,
+      and serves the real 1.1 MB classifier with its SHA-256. Edit the state out
+      of a signed aggregate and the signature fails.</p>
     </div>
   </div>
   <div class="brand">AgriN</div><div class="num">9</div>
@@ -400,9 +404,11 @@
       check names the <em>user-visible consequence</em>, not an internal state,
       and is graded <span class="tag no">blocker</span>
       <span class="tag part">degraded</span> <span class="tag ok">ok</span>.</p>
-      <p>It currently reports <strong>one blocker: no SMS provider</strong>, so
-      no farmer can sign in yet. It says so itself, in public, rather than
-      waiting to be found out.</p>
+      <p>It currently reports <strong>two blockers</strong>: no SMS provider, so
+      no farmer can sign in yet — and the fixed demo code that let <em>you</em>
+      sign in, which it refuses to call acceptable now that the node holds
+      someone else's data. It says both in public, rather than waiting to be
+      found out.</p>
     </div>
     <div class="card">
       <h3>Weeks, not quarters — what a pilot needs</h3>
