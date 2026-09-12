@@ -12,12 +12,14 @@ const DEV_HOST = 'http://10.0.2.2:8099'; // Android emulator -> host machine
 /**
  * The India node. This is the ONLY node a released build will ever talk to.
  *
- * TODO: replace with the deployed host before any farmer build. Until a node
- * is actually deployed this resolves to nothing, and a release build cannot
- * sign in -- which is the honest failure, rather than silently pointing
- * somewhere unintended.
+ * Free hosting, and the app has to survive what that means: the service sleeps
+ * after 15 minutes idle and takes 30-60 seconds to answer the request that
+ * wakes it. That is longer than the HTTP timeout used elsewhere in this app,
+ * so REQUEST_TIMEOUT_MS below is set for it -- otherwise the first tap after a
+ * quiet afternoon reads as "no internet" to a farmer standing in a field, and
+ * the second tap, which would have worked, never happens.
  */
-const PRODUCTION_URL = 'https://node-in.agrin.example';
+const PRODUCTION_URL = 'https://agrin-node-in.onrender.com';
 
 export const API_URL = __DEV__ ? DEV_HOST : PRODUCTION_URL;
 

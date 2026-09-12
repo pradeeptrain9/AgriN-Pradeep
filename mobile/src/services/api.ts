@@ -15,10 +15,33 @@ import type {
   Narration,
 } from '../types';
 
+/**
+ * Long enough to survive a sleeping node waking up.
+ *
+ * The India node runs on free hosting that stops the service after 15 minutes
+ * idle and takes 30-60 seconds to answer the request that wakes it. At the old
+ * 30 s this aborted every time, and an aborted request carries no HTTP
+ * response -- so `isOffline` called it offline and the farmer was told "No
+ * internet connection" while holding a phone with four bars. The first tap
+ * after a quiet afternoon is exactly when a farmer decides whether this app
+ * works.
+ *
+ * A genuine lack of signal does not wait this long: DNS and connect failures
+ * come back in seconds, so this ceiling is only reached by a server that is
+ * slow rather than absent.
+ */
+const REQUEST_TIMEOUT_MS = 60000;
+
 export const api = axios.create({
-  timeout: 30000,
+  timeout: REQUEST_TIMEOUT_MS,
   headers: { 'Content-Type': 'application/json' },
 });
+
+/** Aborted on our side after REQUEST_TIMEOUT_MS, rather than refused. */
+export const isTimeout = (error: unknown): boolean => {
+  const axiosError = error as AxiosError;
+  return axiosError?.code === 'ECONNABORTED' || axiosError?.code === 'ETIMEDOUT';
+};
 
 api.interceptors.request.use((config) => {
   // Resolved per request rather than at module load, so changing node takes
@@ -33,6 +56,19 @@ api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     if (error.response?.status === 401) useAuthStore.getState().logout();
+
+    // Retry a timeout exactly once. A sleeping node is woken by the request
+    // that times out, so the second attempt usually meets a server that is
+    // already up and answers immediately. Only once, and only for timeouts:
+    // retrying a refused connection just doubles the wait before a farmer is
+    // told something true, and retrying anything with a response would replay
+    // writes the server already accepted.
+    const config = error.config as (typeof error.config & { _retried?: boolean });
+    if (config && !config._retried && isTimeout(error)) {
+      config._retried = true;
+      return api.request(config);
+    }
+
     return Promise.reject(error);
   },
 );
@@ -45,6 +81,13 @@ export const isOffline = (error: unknown): boolean => {
 
 export const readableError = (error: unknown, fallback: string): string => {
   const axiosError = error as AxiosError<{ detail?: string }>;
+  // Checked before isOffline, which is also true for a timeout: "no internet"
+  // is the wrong thing to tell someone whose signal is fine and whose server
+  // is asleep, and it is the message that makes them stop trying.
+  if (isTimeout(error)) {
+    return 'The node is taking a long time to answer. It may be waking up — '
+      + 'try again in a moment.';
+  }
   if (isOffline(error)) return 'No internet connection. Saved on your phone.';
   return axiosError?.response?.data?.detail ?? fallback;
 };
