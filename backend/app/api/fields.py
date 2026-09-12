@@ -31,7 +31,8 @@ async def _load_field(db: AsyncSession, field_id: str, user_id: str) -> dict:
     result = await db.execute(
         text(
             "SELECT id, name, area_ha, ST_AsGeoJSON(geom::geometry) AS geometry, "
-            "ST_X(centroid::geometry) AS lon, ST_Y(centroid::geometry) AS lat, created_at "
+            "ST_X(centroid::geometry) AS lon, ST_Y(centroid::geometry) AS lat, "
+            "created_at, source "
             "FROM fields WHERE id = :id AND user_id = :user_id AND archived_at IS NULL"
         ),
         {"id": field_id, "user_id": user_id},
@@ -90,13 +91,20 @@ async def create_field(
     geojson = json.dumps(geometry)
     await db.execute(
         text(
-            "INSERT INTO fields (id, user_id, name, geom, centroid, area_ha) VALUES ("
+            "INSERT INTO fields (id, user_id, name, geom, centroid, area_ha, source) VALUES ("
             "  :id, :user_id, :name,"
             "  ST_GeomFromGeoJSON(:geojson)::geography,"
             "  ST_Centroid(ST_GeomFromGeoJSON(:geojson))::geography,"
-            "  ST_Area(ST_GeomFromGeoJSON(:geojson)::geography) / 10000.0)"
+            "  ST_Area(ST_GeomFromGeoJSON(:geojson)::geography) / 10000.0,"
+            "  :source)"
         ),
-        {"id": field_id, "user_id": user.user_id, "name": payload.name, "geojson": geojson},
+        {
+            "id": field_id,
+            "user_id": user.user_id,
+            "name": payload.name,
+            "geojson": geojson,
+            "source": payload.source,
+        },
     )
     await db.commit()
 
@@ -112,6 +120,7 @@ def _to_out(field: dict) -> FieldOut:
         centroid=[field["lon"], field["lat"]],
         geometry=json.loads(field["geometry"]),
         created_at=field["created_at"],
+        source=field.get("source") or "walked",
         crop=_json_safe(field.get("crop")),
         soil=field.get("soil"),
     )
@@ -130,7 +139,8 @@ async def list_fields(
     result = await db.execute(
         text(
             "SELECT id, name, area_ha, ST_AsGeoJSON(geom::geometry) AS geometry, "
-            "ST_X(centroid::geometry) AS lon, ST_Y(centroid::geometry) AS lat, created_at "
+            "ST_X(centroid::geometry) AS lon, ST_Y(centroid::geometry) AS lat, "
+            "created_at, source "
             "FROM fields WHERE user_id = :user_id AND archived_at IS NULL "
             "ORDER BY created_at DESC"
         ),

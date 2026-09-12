@@ -64,6 +64,10 @@ class GeoJsonPolygon(BaseModel):
 class FieldCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     geometry: GeoJsonPolygon
+    # A walked boundary is a survey; a drawn one is an estimate over a basemap.
+    # The advisory works in units per hectare, so the area is a multiplier on
+    # every figure a farmer acts on -- the distinction has to survive the wire.
+    source: Literal["walked", "drawn"] = "walked"
 
 
 class FieldOut(BaseModel):
@@ -73,6 +77,7 @@ class FieldOut(BaseModel):
     centroid: list[float]
     geometry: dict[str, Any]
     created_at: datetime
+    source: Literal["walked", "drawn"] = "walked"
     crop: dict[str, Any] | None = None
     soil: dict[str, Any] | None = None
 
