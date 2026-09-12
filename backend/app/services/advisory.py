@@ -35,6 +35,47 @@ async def _weather_rows(db: AsyncSession, field_id: str, since: date) -> list[di
     return [dict(row) for row in result.mappings()]
 
 
+async def _why_no_health(db: AsyncSession, field_id: str, sowing: date) -> str:
+    """Say which of the two reasons health cannot be scored, because they are
+    not the same and only one of them is worth waiting for.
+
+    Health reads NDVI from the sowing date onward -- imagery of bare soil, or
+    of the previous crop, says nothing about this one. So a field can hold two
+    hundred days of perfectly clear observations and still score nothing,
+    simply because it was sown last week.
+
+    Saying "no cloud-free satellite observation yet" in that case is false. The
+    node has seen the field, repeatedly. A farmer reading that reasonably
+    concludes the satellite cannot see their land, when what is actually true
+    is that the crop is younger than the most recent clear pass and the answer
+    is a few days away.
+    """
+    result = await db.execute(
+        text(
+            "SELECT count(*) AS clear_views, max(time)::date AS latest "
+            "FROM observations WHERE field_id = :id AND index_name = 'ndvi'"
+        ),
+        {"id": field_id},
+    )
+    row = result.mappings().first()
+    clear_views = int((row and row["clear_views"]) or 0)
+    latest = row and row["latest"]
+
+    if not clear_views or latest is None:
+        return (
+            "No cloud-free satellite picture of this field yet. Sentinel-2 "
+            "passes every few days; under monsoon cloud it can take longer. "
+            "Crop health scoring is paused until one arrives."
+        )
+
+    return (
+        f"The satellite has {clear_views} clear view(s) of this field, but the "
+        f"most recent is from {latest:%-d %B}, before this crop was sown on "
+        f"{sowing:%-d %B}. Pictures of the previous crop say nothing about this "
+        "one, so health scoring starts at the next clear pass."
+    )
+
+
 async def _index_points(
     db: AsyncSession, field_id: str, index_name: str, since: date
 ) -> list[IndexPoint]:
@@ -171,9 +212,7 @@ async def build_advisory(
     ndmi = await _index_points(db, field_id, "ndmi", sowing)
     health = assess(crop=crop, sowing_date=sowing, ndvi=ndvi, ndmi=ndmi, today=today).to_dict()
     if not ndvi:
-        gaps.append(
-            "No cloud-free satellite observation yet. Crop health scoring is paused."
-        )
+        gaps.append(await _why_no_health(db, field_id, sowing))
 
     # ------------------------------------------------------------ nutrients
     previous = None
