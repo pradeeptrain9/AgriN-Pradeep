@@ -15,7 +15,10 @@ from app.ai.disease import Prediction, Route, build_diagnosis, gate
 from app.ai.disease_taxonomy import get_disease
 from app.ai.disease_taxonomy import DATASET_SOURCES, SUPPORTED_CROPS, classes_for_crop
 from app.ai import budget
-from app.ai.vision import VisionIdentification, identify_with_vision, prepare_image
+from app.ai.open_ended import identify_open_ended
+from app.ai.vision import (
+    VisionIdentification, identify_with_vision, prepare_image,
+)
 from app.config import get_settings
 from app.db.session import get_db
 from app.engine.crops import get_crop
@@ -217,11 +220,27 @@ async def create_diagnosis(
         # Anthropic client and a vision call takes seconds; calling it inline
         # from an async endpoint stalls every other request on this node for
         # the duration.
-        # This exact photograph may have been identified already -- a retry
-        # after "inconclusive", a double tap on a slow connection, an outbox
-        # replay, two people on a shared handset. The answer cannot have
-        # changed, so do not buy it twice.
-        prior = await _cached_identification(db, image_sha256, crop.code)
+        # Refuse before spending on a question with no possible answer.
+        #
+        # The vision prompt offers the model this crop's disease codes plus
+        # "unknown". For a crop with no disease list that is a menu of one, so
+        # the call can only ever return "unknown" -- and it is billed all the
+        # same. Four such calls were paid for on soybean and chickpea before
+        # this existed.
+        #
+        # The client now hides those crops, but the client is not the
+        # authority: an older APK, or a photo replayed from the outbox, still
+        # arrives here.
+        no_disease_list = not classes_for_crop(crop.code)
+
+        # A photograph already identified is never bought twice -- a retry after
+        # "inconclusive", a double tap on a slow connection, an outbox replay.
+        # Only the coded path caches: an open-ended name is not stored against a
+        # disease code, so there is nothing to look it up by.
+        prior = (
+            None if no_disease_list
+            else await _cached_identification(db, image_sha256, crop.code)
+        )
 
         if prior is not None:
             cached_label, cached_conf = prior
@@ -237,8 +256,9 @@ async def create_diagnosis(
             )
             extra_notes = identification.notes
         else:
-            # Check the budget before spending, not after. A cap that is
-            # noticed once the money is gone is a report, not a cap.
+            # One budget gate in front of every path that can spend. Checked
+            # before the call, not after: a cap noticed once the money is gone
+            # is a report, not a cap.
             try:
                 await budget.check_budget(db, user.user_id)
             except budget.BudgetReached as exc:
@@ -248,12 +268,21 @@ async def create_diagnosis(
                     "Show the plant to your extension officer before treating it.",
                 ]
             else:
-                identification = await run_in_threadpool(
-                    identify_with_vision,
-                    prepared,
-                    crop_code=crop.code,
-                    crop_label=crop.label_en,
-                )
+                if no_disease_list:
+                    # No verified list for this crop, so there is no code to
+                    # identify and nothing to key a treatment off. Ask for a
+                    # name anyway: a farmer holding a diseased plant can carry a
+                    # name to an extension officer, and silence helps nobody.
+                    identification = await run_in_threadpool(
+                        identify_open_ended, prepared, crop_label=crop.label_en
+                    )
+                else:
+                    identification = await run_in_threadpool(
+                        identify_with_vision,
+                        prepared,
+                        crop_code=crop.code,
+                        crop_label=crop.label_en,
+                    )
                 extra_notes = identification.notes
                 if identification.usage is not None and identification.model:
                     await budget.record(
@@ -263,12 +292,16 @@ async def create_diagnosis(
                         usage=identification.usage,
                         user_id=user.user_id,
                     )
+
         identified = identification is not None and identification.identified
         disease = get_disease(identification.disease_code) if identified else None
         confidence = identification.confidence if identification else 0.0
-        resolved_by = (
-            Route.CLAUDE_VISION.value if identified else Route.INCONCLUSIVE.value
-        )
+        if identified:
+            resolved_by = Route.CLAUDE_VISION.value
+        elif identification is not None and identification.provisional_name:
+            resolved_by = Route.PROVISIONAL.value
+        else:
+            resolved_by = Route.INCONCLUSIVE.value
 
     options = await chemicals(disease.code) if disease is not None else []
     diagnosis = build_diagnosis(
@@ -279,6 +312,9 @@ async def create_diagnosis(
         decision=decision,
         chemical_options=options,
         extra_notes=extra_notes,
+        provisional_name=(
+            identification.provisional_name if identification else None
+        ),
     )
 
     # The highest-probability prediction, not the first one sent. The client

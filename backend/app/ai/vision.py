@@ -100,6 +100,60 @@ def _clamped_confidence(value: object) -> float:
     return max(0.0, min(1.0, number))
 
 
+OPEN_ENDED_SYSTEM_PROMPT = """\
+You are a plant pathologist looking at a photograph of a crop leaf sent by a \
+smallholder farmer.
+
+This node has no verified disease list for this crop, so there is no list to \
+choose from. Name what you see, or answer "unknown".
+
+Rules:
+- Give the common English name of the disease or pest, as plainly as you can. \
+A farmer will repeat this name to an extension officer.
+- Answer "unknown" when the photo is blurred, too dark, too far away, shows no \
+leaf, or shows nothing you can identify. A wrong confident answer costs a \
+farmer a season; "unknown" costs them a second photo.
+- Never name a pesticide, fungicide or any chemical product, and never suggest \
+a treatment. This node cannot check a treatment for this crop, so naming one \
+would be worse than saying nothing.
+- Give your confidence honestly. Field photos are harder than textbook images, \
+and you are working without a list of the diseases known to occur here.
+- Describe only symptoms you can actually see in this image.
+"""
+
+OPEN_ENDED_USER_PROMPT = """\
+Crop: {crop_label}
+
+There is no verified disease list for this crop on this node.
+
+Name what you see in the photograph, or answer "unknown"."""
+
+
+def _open_ended_schema() -> dict:
+    """No enum: the point of this path is that there is no list to pick from.
+
+    `disease_name` is free text and therefore keys into nothing -- not a
+    treatment, not an IPM action, not a pesticide row. The caller must present
+    it as an unconfirmed name and attach no advice to it.
+    """
+    return {
+        "type": "object",
+        "properties": {
+            "disease_name": {"type": ["string", "null"]},
+            "confidence": {"type": "number"},
+            "visible_symptoms": {"type": "string"},
+            "image_quality_issue": {"type": ["string", "null"]},
+        },
+        "required": [
+            "disease_name",
+            "confidence",
+            "visible_symptoms",
+            "image_quality_issue",
+        ],
+        "additionalProperties": False,
+    }
+
+
 def prepare_image(raw: bytes) -> tuple[bytes, str]:
     """Downscale, re-encode as JPEG, and strip metadata.
 
@@ -144,6 +198,11 @@ class VisionIdentification:
     disease_code: str | None
     confidence: float
     notes: list[str] = dc_field(default_factory=list)
+    # Set only on the open-ended path, for crops this node has no verified
+    # disease list for. It is a name and nothing more: it keys into no
+    # treatment, no IPM action and no pesticide row, and must never be
+    # presented as though it did.
+    provisional_name: str | None = None
     # What this call cost, for the ledger. None when no call was made -- an
     # unconfigured key, a cap already reached, a refusal before billing.
     usage: object | None = None

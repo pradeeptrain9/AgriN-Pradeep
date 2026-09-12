@@ -15,8 +15,14 @@ import re
 
 APP = pathlib.Path(__file__).resolve().parents[2] / "app"
 
-# The only two things in this system that talk to a paid API.
-EXPECTED_CALL_SITES = {"app/ai/narrate.py", "app/ai/vision.py"}
+# The only things in this system that talk to a paid API.
+EXPECTED_CALL_SITES = {
+    "app/ai/narrate.py",
+    "app/ai/vision.py",
+    # Crops with no verified disease list. Reached from the same endpoint and
+    # behind the same budget.check_budget as the coded path.
+    "app/ai/open_ended.py",
+}
 
 # The layers that own a db session and a user, and so can enforce the cap.
 EXPECTED_GATES = {"app/api/advisory.py", "app/api/diagnoses.py"}
@@ -109,3 +115,36 @@ def test_the_pricing_regex_finds_no_hardcoded_model_in_call_sites():
         src = (APP.parent / name).read_text()
         for match in re.finditer(r'model=["\']([\w.-]+)["\']', src):
             raise AssertionError(f"{name} hardcodes model {match.group(1)!r}")
+
+
+class TestCropsWithNoDiseaseList:
+    """A crop with no disease list must never reach the paid model.
+
+    The vision prompt offers the model that crop's disease codes plus
+    "unknown". With no codes it is a menu of one, so the call can only return
+    "unknown" -- and it bills the same as a useful answer. Seven such calls were
+    paid for on a trial account before this was caught, on soybean and chickpea.
+    """
+
+    def test_the_endpoint_checks_coverage_before_spending(self):
+        src = (APP / "api" / "diagnoses.py").read_text()
+        assert "no_disease_list" in src, "coverage gate is gone"
+        # It must come before the budget check, which is itself before the call.
+        assert src.index("no_disease_list") < src.index("check_budget")
+
+    def test_crops_without_classes_are_flagged_to_the_client(self):
+        # The client hides them, which stops the spend at source. The server
+        # gate above is the backstop for an old APK or an outbox replay.
+        src = (APP / "api" / "advisory.py").read_text()
+        assert '"diagnosable"' in src
+
+    def test_the_taxonomy_actually_has_gaps_worth_gating(self):
+        from app.ai.disease_taxonomy import classes_for_crop
+        from app.engine.crops import list_crops
+
+        codes = [c.code for c in list_crops()]
+        without = [c for c in codes if not classes_for_crop(c)]
+        withs = [c for c in codes if classes_for_crop(c)]
+        # If this ever becomes empty the gate is dead code -- but so is the bug.
+        assert without, "no crop lacks a disease list; revisit the gate"
+        assert withs, "no crop has a disease list; the model is unusable"
