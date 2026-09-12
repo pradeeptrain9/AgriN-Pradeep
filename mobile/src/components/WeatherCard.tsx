@@ -93,24 +93,32 @@ export const WeatherCard: React.FC<Props> = ({
           : 'No rain expected in the days ahead.'}
       </Text>
 
-      <View style={styles.row}>
+      {/* One row per day, not eight columns across.
+          Columns were the first attempt and they broke on a real phone: the
+          type scale here is deliberately large so a farmer can read it outdoors
+          at arm's length, and eight of those across 360dp leaves 40dp each.
+          "Tomorrow" wrapped to three lines, every column ended up a different
+          height, and the grid stopped lining up at all. Shrinking the text
+          would have fixed the layout by breaking the thing the layout is for. */}
+      <View style={styles.days}>
         {daily.map((day) => (
           <View
             key={day.day}
-            style={[styles.day, day.kind === 'observed' && styles.dayObserved]}
+            style={[styles.dayRow, day.kind === 'observed' && styles.dayObserved]}
             accessible
             accessibilityLabel={
               `${dayLabel(day.day)}, ${day.kind === 'observed' ? 'measured' : 'expected'}, `
-              + `high ${temperature(day.tmax_c)}, low ${temperature(day.tmin_c)}, `
-              + `rain ${rain(day.precip_mm)} millimetres`
+              + `rain ${rain(day.precip_mm)} millimetres, `
+              + `high ${temperature(day.tmax_c)}, low ${temperature(day.tmin_c)}`
             }
           >
-            <Text style={styles.dayName}>{dayLabel(day.day)}</Text>
-            <Text style={styles.rain}>{rain(day.precip_mm)}</Text>
-            <Text style={styles.rainUnit}>mm</Text>
-            <Text style={styles.temps}>
+            <Text style={styles.dayName} numberOfLines={1}>{dayLabel(day.day)}</Text>
+            <Text style={styles.dayRain} numberOfLines={1}>
+              {rain(day.precip_mm)}<Text style={styles.rainUnit}> mm</Text>
+            </Text>
+            <Text style={styles.dayTemps} numberOfLines={1}>
               {temperature(day.tmax_c)}
-              <Text style={styles.tempMin}> {temperature(day.tmin_c)}</Text>
+              <Text style={styles.tempMin}> / {temperature(day.tmin_c)}</Text>
             </Text>
           </View>
         ))}
@@ -137,18 +145,25 @@ const styles = StyleSheet.create({
   stale: { ...type.label, color: colors.textMuted },
   summary: { ...type.body, color: colors.text, marginTop: spacing.xs },
   empty: { ...type.body, color: colors.textMuted, marginTop: spacing.xs },
-  row: { flexDirection: 'row', marginTop: spacing.md },
-  day: {
-    flex: 1,
+  days: { marginTop: spacing.sm },
+  dayRow: {
+    flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
     borderRadius: radius.sm,
+    // A hairline between rows so eight of them read as a list rather than a
+    // block of numbers.
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
   dayObserved: { backgroundColor: colors.bg },
-  dayName: { ...type.label, color: colors.textMuted },
-  rain: { ...type.body, color: colors.text, fontWeight: '700', marginTop: 2 },
-  rainUnit: { ...type.label, color: colors.textMuted },
-  temps: { ...type.label, color: colors.text, marginTop: 4 },
+  // Widest label is "Yesterday"; fixed so every row's figures line up in a
+  // column the eye can run down.
+  dayName: { ...type.body, color: colors.text, width: 104 },
+  dayRain: { ...type.body, color: colors.text, fontWeight: '700', flex: 1, textAlign: 'right' },
+  rainUnit: { ...type.caption, color: colors.textMuted, fontWeight: '400' },
+  dayTemps: { ...type.body, color: colors.text, width: 96, textAlign: 'right' },
   tempMin: { color: colors.textMuted },
   legend: { ...type.label, color: colors.textMuted, marginTop: spacing.sm },
 });

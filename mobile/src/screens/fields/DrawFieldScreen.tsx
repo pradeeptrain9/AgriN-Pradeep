@@ -224,10 +224,10 @@ export const DrawFieldScreen: React.FC<{ navigation: any }> = ({ navigation }) =
       </Text>
 
       <View style={styles.stats}>
-        <Stat label="Corners" value={String(corners.length)} />
+        <Stat label="corners" value={String(corners.length)} />
         <Stat
-          label="Area"
-          value={validation.areaHa > 0 ? `${validation.areaHa.toFixed(2)} ha` : '—'}
+          label="hectares"
+          value={validation.areaHa > 0 ? validation.areaHa.toFixed(2) : '—'}
         />
       </View>
 
@@ -315,23 +315,29 @@ const Stat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
  * overlay, which is absolutely positioned and cannot shift anything.
  */
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg, padding: spacing.md },
+  container: { flex: 1, backgroundColor: colors.bg, paddingBottom: spacing.md },
+  // Caption, not body, and tighter. It is a standing disclaimer rather than an
+  // instruction, and at body size it was taking four lines off the top of the
+  // map -- the one element on this screen a farmer actually has to work in.
   notice: {
-    ...type.body,
+    ...type.caption,
     color: colors.text,
     backgroundColor: '#FFF3CD',
-    borderRadius: radius.sm,
-    padding: spacing.sm,
-    marginBottom: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
-  stats: { flexDirection: 'row', justifyContent: 'space-between' },
-  stat: {
-    flex: 1, alignItems: 'center', backgroundColor: colors.surface,
-    borderRadius: radius.md, paddingVertical: spacing.md, marginHorizontal: spacing.xs,
+  // Corners and area on one line instead of two cards. They are a readout to
+  // glance at, not a section of the page.
+  stats: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline',
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
   },
+  stat: { flexDirection: 'row', alignItems: 'baseline' },
   statValue: { ...type.title, color: colors.text },
-  statLabel: { ...type.caption, color: colors.textMuted },
-  canvas: { flex: 1, marginVertical: spacing.md, borderRadius: radius.md, overflow: 'hidden' },
+  statLabel: { ...type.caption, color: colors.textMuted, marginLeft: spacing.xs },
+  // Full bleed and given every pixel the rest of the screen does not need.
+  // The map is where the work happens; everything else is a caption on it.
+  canvas: { flex: 1, overflow: 'hidden' },
   overlay: {
     position: 'absolute', top: spacing.sm, left: spacing.sm, right: spacing.sm,
     backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: radius.sm,
@@ -348,12 +354,15 @@ const styles = StyleSheet.create({
   },
   undoDisabled: { opacity: 0.4 },
   undoText: { ...type.body, color: colors.text, fontWeight: '600' },
-  label: { ...type.label, color: colors.text, marginBottom: spacing.sm },
+  label: {
+    ...type.caption, color: colors.textMuted,
+    paddingHorizontal: spacing.md, marginTop: spacing.sm,
+  },
   input: {
     ...type.body, color: colors.text, borderWidth: 2, borderColor: colors.border,
-    borderRadius: radius.md, paddingHorizontal: spacing.md, minHeight: 56,
-    marginBottom: spacing.md,
+    borderRadius: radius.md, paddingHorizontal: spacing.md, minHeight: 52,
+    marginHorizontal: spacing.md, marginTop: spacing.xs,
   },
-  actions: { paddingBottom: spacing.md },
+  actions: { paddingHorizontal: spacing.md, paddingTop: spacing.sm },
   spacer: { height: spacing.sm },
 });
