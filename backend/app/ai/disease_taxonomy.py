@@ -36,7 +36,15 @@ from dataclasses import dataclass, field as dc_field
 
 # Crops the on-device classifier is trained for. Anything else is out of
 # distribution and must be routed away from it.
-SUPPORTED_CROPS = frozenset({"rice", "maize", "potato", "wheat_spring", "wheat_winter"})
+# Crops the SHIPPED on-device model can actually answer -- not crops that have
+# a disease taxonomy, which is a different and larger set.
+#
+# This listed maize, potato and wheat while the only trained weights in this
+# repository are rice-only (models/rice_disease.labels.json is ten rice
+# classes). The gate treated those crops as covered, so a confident prediction
+# for one of them would have been accepted on device with no trained model
+# behind it. Keep this in step with the labels file, not with the taxonomy.
+SUPPORTED_CROPS = frozenset({"rice"})
 
 # Crops with thin training data; diagnoses are returned with a lowered ceiling.
 LOW_CONFIDENCE_CROPS = frozenset({"wheat_spring", "wheat_winter"})

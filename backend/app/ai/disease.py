@@ -48,6 +48,12 @@ class Route(str, Enum):
     ON_DEVICE = "on_device"
     CLAUDE_VISION = "claude_vision"
     INCONCLUSIVE = "inconclusive"
+    # A name, on a crop with no verified disease list. Distinct from
+    # INCONCLUSIVE because something WAS identified and a call WAS billed --
+    # collapsing the two would make the audit log read as though nothing
+    # happened -- and distinct from CLAUDE_VISION because nothing downstream
+    # checked the answer and no treatment is attached to it.
+    PROVISIONAL = "provisional"
 
 
 @dataclass(frozen=True)
@@ -153,6 +159,24 @@ def gate(predictions: list[Prediction], *, crop_code: str) -> GateDecision:
             reasons=reasons,
         )
 
+    # A prediction naming another crop's disease cannot be about this crop, and
+    # must not be weighed on confidence. The app filters by crop prefix before
+    # sending, so this should never fire -- but the gate is the authority, and a
+    # stale APK or a replayed queue item reaches it directly. Accepting one of
+    # these would tell a farmer their maize has a rice disease.
+    allowed = {d.code for d in classes_for_crop(crop_code)}
+    foreign = [p for p in ranked if p.class_code not in allowed]
+    if foreign:
+        reasons.append(
+            f"The on-device prediction named {foreign[0].class_code}, which is "
+            f"not a disease of {crop_code}, so it cannot be about this plant."
+        )
+        return GateDecision(
+            route=Route.CLAUDE_VISION, accepted=False, top_class=None,
+            top_probability=top_prob, margin=margin, normalised_entropy=entropy,
+            thresholds=thresholds, reasons=reasons,
+        )
+
     if not ranked:
         reasons.append("No on-device prediction was supplied.")
         return GateDecision(
@@ -210,6 +234,10 @@ class Diagnosis:
     chemical_options: list[dict]
     gate: dict
     notes: list[str] = dc_field(default_factory=list)
+    # A name for a crop this node has no verified list for. Deliberately NOT a
+    # disease_code: it keys into no IPM action and no pesticide row, and the
+    # client must render it as unconfirmed with no treatment beside it.
+    provisional_name: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -227,6 +255,7 @@ class Diagnosis:
             "chemical_options": self.chemical_options,
             "gate": self.gate,
             "notes": self.notes,
+            "provisional_name": self.provisional_name,
         }
 
 
@@ -239,9 +268,33 @@ def build_diagnosis(
     decision: GateDecision,
     chemical_options: list[dict] | None = None,
     extra_notes: list[str] | None = None,
+    provisional_name: str | None = None,
 ) -> Diagnosis:
     notes = list(extra_notes or [])
     chemical_options = chemical_options or []
+
+    if disease is None and provisional_name:
+        # Named, but on a crop with no verified list. Everything that could
+        # become an instruction stays empty: no code, no IPM action, no
+        # chemical. The caveats are already in extra_notes, written by the
+        # module that produced the name.
+        return Diagnosis(
+            engine_version=ENGINE_VERSION,
+            resolved_by=resolved_by,
+            disease_code=None,
+            label=None,
+            crop_code=crop_code,
+            confidence=confidence,
+            is_healthy=False,
+            pathogen_type=None,
+            urgent=False,
+            needs_expert_review=True,
+            ipm_actions=[],
+            chemical_options=[],
+            gate=decision.to_dict(),
+            notes=notes,
+            provisional_name=provisional_name,
+        )
 
     if disease is None:
         notes.append(

@@ -16,7 +16,9 @@ from app.ai.disease import (
     gate,
     normalised_entropy,
 )
-from app.ai.disease_taxonomy import get_disease, is_crop_supported
+from app.ai.disease_taxonomy import (
+    LOW_CONFIDENCE_CROPS, get_disease, is_crop_supported,
+)
 
 
 def preds(*pairs):
@@ -73,9 +75,70 @@ class TestCoverageGate:
         decision = gate(preds(("rice__blast", 0.99)), crop_code=crop)
         assert decision.route is Route.CLAUDE_VISION
 
-    def test_supported_crops_reach_the_confidence_checks(self):
-        for crop in ("rice", "maize", "potato"):
-            assert is_crop_supported(crop)
+    def test_only_crops_with_trained_weights_are_supported(self):
+        # This asserted maize and potato were supported while the only weights
+        # in the repository are rice-only, so the gate treated an untrained
+        # crop as covered. Keep this in step with the labels file.
+        assert is_crop_supported("rice")
+        for crop in ("maize", "potato", "wheat_spring", "wheat_winter"):
+            assert not is_crop_supported(crop)
+
+    def test_supported_crops_match_the_shipped_labels_file(self):
+        import json
+        import pathlib as _pathlib
+
+        from app.ai.disease_taxonomy import SUPPORTED_CROPS
+
+        labels = json.loads(
+            (_pathlib.Path(__file__).resolve().parents[2] / "models"
+             / "rice_disease.labels.json").read_text()
+        )
+        assert SUPPORTED_CROPS == {code.split("__")[0] for code in labels}
+
+
+class TestCrossCropPredictions:
+    """A prediction naming another crop's disease is not about this plant.
+
+    The app filters predictions by crop prefix before sending, so these should
+    never arrive -- but the gate is the authority, and a stale APK or a replayed
+    outbox item reaches it directly. Accepting one would tell a farmer their
+    maize has a rice disease, at whatever confidence the number claimed.
+    """
+
+    # Rice is the only crop with weights, so it is the only crop whose
+    # predictions reach this check at all -- for anything else the coverage
+    # rule refuses first, which is also correct but tests something different.
+
+    def test_a_confident_foreign_class_is_refused(self):
+        decision = gate(preds(("potato__late_blight", 0.99)), crop_code="rice")
+        assert decision.route is Route.CLAUDE_VISION
+        assert not decision.accepted
+        assert decision.top_class is None
+
+    def test_the_refusal_says_which_class_was_wrong(self):
+        decision = gate(preds(("potato__late_blight", 0.99)), crop_code="rice")
+        assert any(
+            "potato__late_blight" in r and "rice" in r for r in decision.reasons
+        )
+
+    def test_one_foreign_class_among_valid_ones_still_refuses(self):
+        # Not "mostly right": a model emitting another crop's label is not a
+        # model whose other outputs should be trusted for this plant.
+        decision = gate(
+            preds(("rice__blast", 0.80), ("rice__brown_spot", 0.15),
+                  ("potato__late_blight", 0.05)),
+            crop_code="rice",
+        )
+        assert decision.route is Route.CLAUDE_VISION
+        assert not decision.accepted
+
+    def test_wheat_aliasing_is_not_treated_as_foreign(self):
+        # Wheat classes are stored under crop_code "wheat_spring" but keyed
+        # "wheat__", and wheat_winter shares them. That alias must not read as
+        # a cross-crop prediction.
+        for crop in ("wheat_spring", "wheat_winter"):
+            decision = gate(preds(("wheat__leaf_rust", 0.95)), crop_code=crop)
+            assert not any("not a disease of" in r for r in decision.reasons)
 
 
 class TestConfidenceGate:
@@ -128,23 +191,41 @@ class TestThinDataCrops:
             crop_code="wheat_spring",
         )
         assert rice.route is Route.ON_DEVICE
+        # Wheat refuses -- today because it has no weights at all, and once it
+        # has them because 0.78 is under its stricter 0.85 bar.
         assert wheat.route is Route.CLAUDE_VISION
         assert wheat.thresholds["min_confidence"] == LOW_DATA_MIN_CONFIDENCE
         assert rice.thresholds["min_confidence"] == MIN_CONFIDENCE
 
-    def test_wheat_accepted_when_very_confident(self):
+    def test_wheat_routes_to_vision_until_weights_exist(self):
+        # The thin-data thresholds below are real and will matter the day wheat
+        # weights ship. Today there are none, so coverage refuses first --
+        # however confident the number attached to the prediction is.
         strong = preds(
             ("wheat__leaf_rust", 0.95), ("wheat__stripe_rust", 0.03),
             ("wheat__healthy", 0.02),
         )
-        assert gate(strong, crop_code="wheat_spring").route is Route.ON_DEVICE
+        decision = gate(strong, crop_code="wheat_spring")
+        assert decision.route is Route.CLAUDE_VISION
+        assert not decision.accepted
 
-    def test_thin_data_is_disclosed_in_reasons(self):
+    def test_thin_data_thresholds_are_stricter_than_the_default(self):
+        # Asserted through the gate before, which no longer reaches the
+        # disclosure because wheat has no weights and coverage refuses first.
+        # The thresholds themselves are what matter, and they are what will be
+        # applied the day wheat weights ship.
+        assert LOW_DATA_MIN_CONFIDENCE > MIN_CONFIDENCE
+        assert "wheat_spring" in LOW_CONFIDENCE_CROPS
+        assert "wheat_winter" in LOW_CONFIDENCE_CROPS
+
+    def test_the_thin_data_threshold_is_still_reported_on_a_refusal(self):
+        # Even when coverage refuses, the decision carries the thresholds that
+        # would have applied, so an audit of a refusal is not blind.
         decision = gate(
             preds(("wheat__leaf_rust", 0.95), ("wheat__healthy", 0.05)),
             crop_code="wheat_spring",
         )
-        assert any("Training data for this crop is limited" in r for r in decision.reasons)
+        assert decision.thresholds["min_confidence"] == LOW_DATA_MIN_CONFIDENCE
 
 
 class TestDiagnosisAssembly:
