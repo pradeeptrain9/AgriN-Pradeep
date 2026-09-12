@@ -16,6 +16,7 @@ import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-nati
 import { useFocusEffect } from '@react-navigation/native';
 
 import { Button } from '../../components/Button';
+import { NODE_URL_EDITABLE } from '../../constants/config';
 import { colors, radius, spacing, touch, type } from '../../constants/theme';
 import { loadFields, outboxCount } from '../../db';
 import { currentNodeUrl, loadNodeUrl, nodeLabel, setNodeUrl } from '../../services/node';
@@ -108,7 +109,7 @@ export const SettingsScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
           Your fields, soil information and leaf photographs are held here. Each
           country runs its own node, and data is not moved between them.
         </Text>
-        {editing ? (
+        {!NODE_URL_EDITABLE ? null : editing ? (
           <>
             <TextInput
               style={styles.input}

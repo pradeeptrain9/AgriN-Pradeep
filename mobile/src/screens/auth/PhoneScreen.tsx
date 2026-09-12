@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 
 import { Button } from '../../components/Button';
+import { NODE_URL_EDITABLE } from '../../constants/config';
 import { colors, radius, spacing, touch, type } from '../../constants/theme';
 import { readableError, requestOtp } from '../../services/api';
 import { currentNodeUrl, loadNodeUrl, nodeLabel, setNodeUrl } from '../../services/node';
@@ -81,19 +82,31 @@ export const PhoneScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
       </View>
 
       <View>
-        {/* Farmers should be able to see where their data is going, and a
-            federated network means the answer is not always the same node. */}
-        <Pressable
-          onPress={() => setNodeEditor(true)}
-          accessibilityRole="button"
-          accessibilityLabel={`Connected to ${nodeLabel(node)}. Tap to change node.`}
-          style={styles.nodeRow}
-        >
-          <Text style={styles.nodeText}>
-            Connected to <Text style={styles.nodeName}>{nodeLabel(node)}</Text>
-          </Text>
-          <Text style={styles.nodeChange}>Change</Text>
-        </Pressable>
+        {/* A farmer should always be able to SEE where their data is going.
+            Whether they can change it is a different question: pointing the app
+            at another server moves their field boundaries and photographs, and
+            that is not a decision to leave one tap away from a sign-in screen,
+            or one a person could be talked into. Editable in development only,
+            where a tunnel address changes on every restart. */}
+        {NODE_URL_EDITABLE ? (
+          <Pressable
+            onPress={() => setNodeEditor(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`Connected to ${nodeLabel(node)}. Tap to change node.`}
+            style={styles.nodeRow}
+          >
+            <Text style={styles.nodeText}>
+              Connected to <Text style={styles.nodeName}>{nodeLabel(node)}</Text>
+            </Text>
+            <Text style={styles.nodeChange}>Change</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.nodeRow}>
+            <Text style={styles.nodeText}>
+              Connected to <Text style={styles.nodeName}>{nodeLabel(node)}</Text>
+            </Text>
+          </View>
+        )}
 
         <Button label="Send code" onPress={submit} disabled={!valid} loading={busy} />
       </View>

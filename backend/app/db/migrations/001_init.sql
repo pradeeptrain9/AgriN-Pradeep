@@ -1,7 +1,22 @@
 -- AgriN node schema. Idempotent: safe to re-run.
 CREATE EXTENSION IF NOT EXISTS postgis;
-CREATE EXTENSION IF NOT EXISTS timescaledb;
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- TimescaleDB is an optimisation here, not a requirement. It is used for
+-- exactly two create_hypertable() calls below and nothing else -- no
+-- time_bucket, no continuous aggregates, no compression -- so on a host that
+-- does not offer it (most managed Postgres, including the free tiers this is
+-- likely to be deployed on) the same tables work as ordinary ones. At pilot
+-- scale the difference is unmeasurable.
+--
+-- PostGIS above is NOT optional: field geometry depends on it.
+DO $$
+BEGIN
+    CREATE EXTENSION IF NOT EXISTS timescaledb;
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'TimescaleDB unavailable; time-series tables stay plain tables.';
+END
+$$;
 
 -- ---------------------------------------------------------------- identity
 CREATE TABLE IF NOT EXISTS users (
@@ -75,7 +90,13 @@ CREATE TABLE IF NOT EXISTS observations (
     source          text NOT NULL DEFAULT 'sentinel2-l2a',
     PRIMARY KEY (field_id, index_name, time)
 );
-SELECT create_hypertable('observations', 'time', if_not_exists => TRUE);
+DO $$
+BEGIN
+    PERFORM create_hypertable('observations', 'time', if_not_exists => TRUE);
+EXCEPTION WHEN undefined_function THEN
+    RAISE NOTICE 'observations stays a plain table (no TimescaleDB).';
+END
+$$;
 
 CREATE TABLE IF NOT EXISTS weather_daily (
     time        timestamptz NOT NULL,
@@ -92,7 +113,13 @@ CREATE TABLE IF NOT EXISTS weather_daily (
     source      text NOT NULL DEFAULT 'open-meteo',
     PRIMARY KEY (field_id, time)
 );
-SELECT create_hypertable('weather_daily', 'time', if_not_exists => TRUE);
+DO $$
+BEGIN
+    PERFORM create_hypertable('weather_daily', 'time', if_not_exists => TRUE);
+EXCEPTION WHEN undefined_function THEN
+    RAISE NOTICE 'weather_daily stays a plain table (no TimescaleDB).';
+END
+$$;
 
 -- ------------------------------------------------------------- advisory/AI
 CREATE TABLE IF NOT EXISTS advisories (

@@ -8,9 +8,31 @@
  */
 
 const DEV_HOST = 'http://10.0.2.2:8099'; // Android emulator -> host machine
+
+/**
+ * The India node. This is the ONLY node a released build will ever talk to.
+ *
+ * TODO: replace with the deployed host before any farmer build. Until a node
+ * is actually deployed this resolves to nothing, and a release build cannot
+ * sign in -- which is the honest failure, rather than silently pointing
+ * somewhere unintended.
+ */
 const PRODUCTION_URL = 'https://node-in.agrin.example';
 
 export const API_URL = __DEV__ ? DEV_HOST : PRODUCTION_URL;
+
+/**
+ * Whether a person may change which node the app talks to.
+ *
+ * A farmer should not have to think about this, and should certainly not be
+ * able to be talked into pointing their app at someone else's server -- the
+ * node is where their field boundaries and photographs live.
+ *
+ * Development keeps it editable because testing requires it: a tunnel address
+ * changes every time the tunnel restarts, and a phone on a desk needs to reach
+ * a laptop. Same binary shape, one flag.
+ */
+export const NODE_URL_EDITABLE = __DEV__;
 
 /**
  * Raster OSM tiles. Heavier per tile than vector but decoded by the OS, which

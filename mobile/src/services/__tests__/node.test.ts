@@ -100,3 +100,45 @@ describe('nodeLabel', () => {
     expect(() => nodeLabel('not a url')).not.toThrow();
   });
 });
+
+describe('who may change the node', () => {
+  // A farmer should always see which node holds their fields and photographs,
+  // but changing it moves that data to someone else's server -- not a decision
+  // to leave one tap from a sign-in screen, or one a person could be talked
+  // into over the phone. Development keeps it editable because a tunnel
+  // address changes on every restart.
+
+  it('is editable only in development', () => {
+    const { NODE_URL_EDITABLE } = require('../../constants/config');
+    expect(NODE_URL_EDITABLE).toBe(__DEV__);
+  });
+
+  it('both screens gate their change UI on the flag', () => {
+    // Structural: a screen that forgets the gate ships a switcher to farmers,
+    // and no behavioural test would catch it.
+    // Node's own types are not in this project's tsconfig -- it is a React
+    // Native app -- so the two functions used here are declared inline rather
+    // than adding @types/node for one assertion.
+    const req = require as unknown as (m: string) => {
+      readFileSync: (p: string, enc: string) => string;
+      join: (...parts: string[]) => string;
+      cwd: () => string;
+    };
+    const fs = req('fs');
+    const path = req('path');
+    const here = path.join(req('process').cwd(), 'src', 'screens');
+    for (const screen of [
+      'auth/PhoneScreen.tsx',
+      'settings/SettingsScreen.tsx',
+    ]) {
+      const src = fs.readFileSync(path.join(here, screen), 'utf8');
+      expect(src).toContain('NODE_URL_EDITABLE');
+    }
+  });
+
+  it('still exposes the node for display, whoever may edit it', () => {
+    // The consent screen names the node, and that must keep working when the
+    // switcher is gone.
+    expect(typeof nodeLabel('https://node-in.agrin.org')).toBe('string');
+  });
+});
