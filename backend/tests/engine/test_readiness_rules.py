@@ -64,3 +64,74 @@ class TestSummary:
         result = readiness._summarise(
             [{"check": "a", "level": "blocker", "detail": "d", "consequence": "c"}])
         assert result["blockers"][0]["consequence"] == "c"
+
+
+class TestPhotoStorageIsDetectedNotConfigured:
+    """A free managed instance rebuilds its filesystem on every deploy.
+
+    The diagnosis row and its verdict are in Postgres and survive; the
+    photograph the farmer took does not. That silently breaks the path where an
+    extension officer reviews a disputed photo, and empties any retraining set.
+
+    Detected by comparing stored records against files, rather than by a flag,
+    because the operator who needs to be told is exactly the one who would not
+    think to set one. These exercise the degraded branch, which local disk
+    never reaches -- the whole point is that it only appears in production.
+    """
+
+    @staticmethod
+    def _run(stored, on_disk, tmp_path):
+        import asyncio
+        from app.api.readiness import _media_check
+
+        directory = tmp_path / "diagnoses"
+        directory.mkdir()
+        for i in range(on_disk):
+            (directory / f"{i}.jpg").write_bytes(b"x")
+
+        class Db:
+            async def scalar(self, *_args, **_kwargs):
+                return stored
+
+        class Settings:
+            media_root = str(tmp_path)
+
+        return asyncio.run(_media_check(Db(), Settings()))
+
+    def test_a_node_that_has_lost_photographs_says_so(self, tmp_path):
+        result = self._run(stored=12, on_disk=0, tmp_path=tmp_path)
+        assert result["level"] == "degraded"
+        assert "12 diagnosis record(s) but 0 photograph(s)" in result["detail"]
+
+    def test_it_names_the_consequence_not_the_mechanism(self, tmp_path):
+        # An operator reading this needs to know what a farmer loses, not what
+        # a filesystem did.
+        consequence = self._run(stored=12, on_disk=0, tmp_path=tmp_path)["consequence"]
+        assert "officer cannot review" in consequence
+        assert "retraining set" in consequence
+
+    def test_partial_loss_is_still_loss(self, tmp_path):
+        # One deploy mid-pilot loses everything before it and nothing after.
+        assert self._run(stored=10, on_disk=3, tmp_path=tmp_path)["level"] == "degraded"
+
+    def test_a_node_keeping_its_photographs_is_ok(self, tmp_path):
+        assert self._run(stored=5, on_disk=5, tmp_path=tmp_path)["level"] == "ok"
+
+    def test_a_node_that_has_answered_nothing_is_not_accused(self, tmp_path):
+        # A fresh node has no diagnoses and no files. That is not data loss.
+        assert self._run(stored=0, on_disk=0, tmp_path=tmp_path)["level"] == "ok"
+
+    def test_a_missing_directory_does_not_raise(self, tmp_path):
+        # /ready must report, never 500 -- it is what an operator opens when
+        # something is already wrong.
+        import asyncio
+        from app.api.readiness import _media_check
+
+        class Db:
+            async def scalar(self, *_args, **_kwargs):
+                return 4
+
+        class Settings:
+            media_root = str(tmp_path / "does-not-exist")
+
+        assert asyncio.run(_media_check(Db(), Settings()))["level"] == "degraded"

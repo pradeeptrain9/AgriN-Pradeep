@@ -11,12 +11,16 @@ import pathlib
 import asyncpg
 
 from app.config import get_settings
+from app.db.url import asyncpg_dsn
 
 MIGRATIONS = pathlib.Path(__file__).parent / "migrations"
 
 
 def _dsn() -> str:
-    return get_settings().database_url.replace("postgresql+asyncpg://", "postgresql://")
+    # asyncpg and SQLAlchemy want opposite spellings of the same SSL setting,
+    # and this is the half that talks to asyncpg directly. See app/db/url.py --
+    # getting this wrong applies every migration and then fails every request.
+    return asyncpg_dsn(get_settings().database_url)
 
 
 async def run() -> None:

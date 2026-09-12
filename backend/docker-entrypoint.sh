@@ -15,4 +15,13 @@ if [ "${AGRIN_RUN_MIGRATIONS:-1}" = "1" ]; then
   python -m app.db.migrate
 fi
 
+# The port is decided here, not in the Dockerfile's CMD, because a managed host
+# assigns it at runtime: Render injects PORT and routes to nothing else, so an
+# image that binds a hardcoded port fails its health check and restarts for
+# ever. Defaulting to 8000 keeps the compose file, its healthcheck and the
+# EXPOSE line all correct with PORT unset.
+if [ "$1" = "uvicorn" ]; then
+  exec "$@" --port "${PORT:-8000}"
+fi
+
 exec "$@"

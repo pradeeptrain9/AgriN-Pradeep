@@ -13,6 +13,7 @@ the answer to a red line is obvious. Checks are graded:
 """
 
 import datetime
+import pathlib
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
@@ -202,7 +203,44 @@ async def readiness(db: AsyncSession = Depends(get_db)) -> dict:
             "running?" if level != "ok" else "",
         ))
 
+    # --- do submitted photographs survive a restart?
+    #
+    # A managed host's free instance has ephemeral storage: the filesystem is
+    # rebuilt on every deploy and every wake from idle. The diagnosis row and
+    # its verdict are in Postgres and survive; the photograph the farmer took
+    # does not. That silently breaks the path where an extension officer looks
+    # at a disputed photo, and empties any future retraining set.
+    #
+    # Detected rather than configured, because the operator who needs to know
+    # is exactly the one who would not think to set a flag. Counting stored
+    # diagnoses against files on disk is the honest test: a node that has
+    # answered photographs and has none left has lost them.
+    checks.append(await _media_check(db, settings))
+
     return _summarise(checks)
+
+
+async def _media_check(db: AsyncSession, settings) -> dict:
+    stored = await db.scalar(text(
+        "SELECT count(*) FROM diagnoses WHERE image_path IS NOT NULL")) or 0
+    if stored == 0:
+        return _check("photo_storage", "ok", "no photographs submitted yet")
+
+    directory = pathlib.Path(settings.media_root) / "diagnoses"
+    on_disk = sum(1 for _ in directory.glob("*")) if directory.is_dir() else 0
+
+    if on_disk >= stored:
+        return _check("photo_storage", "ok", f"{on_disk} photograph(s) on disk")
+
+    return _check(
+        "photo_storage", "degraded",
+        f"{stored} diagnosis record(s) but {on_disk} photograph(s) on disk",
+        "Photographs are being lost, which means this node is running on "
+        "ephemeral storage. The diagnosis and its verdict survive; the image "
+        "does not. An officer cannot review a disputed photo, and there is no "
+        "retraining set. Attach a persistent disk or object storage before a "
+        "pilot.",
+    )
 
 
 def _summarise(checks: list[dict]) -> dict:

@@ -17,6 +17,85 @@ cp ../.env.example .env
 Python 3.12 specifically: TensorFlow has no 3.14 wheels, and the geospatial
 stack lags new releases.
 
+### 1b. Managed hosting (Render + Neon)
+
+`render.yaml` in the repo root deploys one node on Render's free tier with its
+database on Neon. Render's own free Postgres is deleted after 30 days; Neon's
+free tier does not expire and offers PostGIS, which is not optional here —
+field geometry is `geography(Polygon,4326)` and every advisory calls `ST_X`,
+`ST_Y` and `ST_Centroid`. TimescaleDB *is* optional: migration `001` wraps it
+in an exception handler, the two hypertables stay ordinary tables, and nothing
+else in the schema notices.
+
+1. **Neon** — create a project, region closest to your farmers (AWS Singapore
+   for India; every request pays that round trip). Copy the connection string.
+   `CREATE EXTENSION postgis` runs inside migration `001`; you do not need to
+   enable anything by hand.
+2. **Render** — New → Blueprint, point it at this repository. Render reads
+   `render.yaml` and prompts for each `sync: false` secret.
+3. Paste the Neon string into `DATABASE_URL` **exactly as Neon shows it**,
+   `?sslmode=require&channel_binding=require` included. See the warning below.
+4. Generate `SECRET_KEY` with
+   `python -c "import secrets; print(secrets.token_urlsafe(48))"`. It signs
+   every farmer's session token, and `/ready` fails the node while the
+   development default is still in place.
+5. Deploy, then from **outside your own network**:
+
+```bash
+curl https://<host>/health          # {"status":"ok","database":"up",...}
+curl https://<host>/ready | jq .summary
+```
+
+#### The connection string is not portable between the two drivers
+
+This node reads one `DATABASE_URL` and gives it to two pieces of code that
+disagree about how to spell SSL. Measured on SQLAlchemy 2.0.36 / asyncpg
+0.30.0:
+
+| | `sslmode=require` | `ssl=require` |
+|---|---|---|
+| `asyncpg.connect` — migrations | works | `CantChangeRuntimeParamError` |
+| `create_async_engine` — every request | `TypeError: unexpected keyword argument` | works |
+
+They are mutually exclusive, so no single string satisfies both, and
+`channel_binding=require` — which Neon puts in the string it shows you —
+is rejected by *both*. Pasted in raw, Neon's spelling produces the worst of
+the available failures: the container starts, applies all nine migrations,
+prints `migrations up to date`, passes its health check, and then fails every
+single request. A green deploy and a dead node.
+
+`app/db/url.py` translates per consumer, so paste the string unmodified and
+leave it alone. It drops `channel_binding` with a logged warning rather than
+silently: asyncpg speaks SCRAM-SHA-256 but not the channel-binding variant, so
+no translation could honour it. TLS is unaffected — `sslmode=require` still
+applies.
+
+#### What the free tier costs, stated plainly
+
+* **Cold start.** Free services sleep after 15 minutes idle and take 30–60
+  seconds to wake. Acceptable while you are the only user; not acceptable for a
+  farmer standing in a field. The 750 instance-hours per month is roughly one
+  service running continuously, with no headroom for a second.
+* **No scheduled ingest.** Background workers need a paid instance, so
+  `render.yaml` declares no worker and no Key Value store. Satellite and
+  weather then refresh only when a farmer opens a field and the app POSTs
+  `/refresh`, which FastAPI runs as a `BackgroundTask` with no Redis involved.
+  This is backwards — see the docstring in `app/worker.py` — because the data a
+  farmer needs is the data fetched *before* they opened the app, while they had
+  signal. `/ready` grades weather freshness, so the staleness is visible rather
+  than assumed.
+* **Photographs are lost.** Free instances have ephemeral storage, rebuilt on
+  every deploy and every wake. The diagnosis row and its verdict are in
+  Postgres and survive; the image does not. `/ready` has a `photo_storage`
+  check that compares stored diagnoses against files on disk and reports
+  `degraded` once they diverge — it detects this rather than trusting a flag,
+  because the operator who needs telling is the one who would not think to set
+  one. Attach a persistent disk or object storage before an extension officer
+  is expected to review a disputed photo.
+
+None of the three is acceptable for the 15–25 farmer pilot in `PILOT.md`.
+All three are fine for finishing the build and testing against a real node.
+
 ## 2. Node identity
 
 Generated automatically on first request to `/federation/.well-known/agrin-node`

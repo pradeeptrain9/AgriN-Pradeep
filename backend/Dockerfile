@@ -23,4 +23,6 @@ USER agrin
 
 EXPOSE 8000
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# No --port here on purpose: the entrypoint appends it from $PORT, falling
+# back to 8000. EXPOSE stays as documentation of that default.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0"]

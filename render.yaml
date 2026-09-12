@@ -1,0 +1,99 @@
+# One AgriN node on Render, with its database on Neon.
+#
+# Render's own free Postgres is deleted after 30 days; Neon's free tier does not
+# expire and offers PostGIS, which migration 001 needs and cannot work around --
+# field geometry is geography(Polygon,4326) and the advisory reads ST_X/ST_Y on
+# every request. TimescaleDB is a different matter: 001 wraps it in an exception
+# handler, so the two hypertables stay ordinary tables and nothing else changes.
+#
+# Deliberately not declared here:
+#
+#   * A Key Value store and an arq worker. Background workers need a paid
+#     instance, so this blueprint has no scheduled ingest -- satellite and
+#     weather refresh only when a farmer opens a field and POSTs /refresh,
+#     which FastAPI runs as a BackgroundTask with no Redis involved. That is
+#     backwards for a real pilot (see app/worker.py) but costs nothing and is
+#     honest: /ready reports the resulting staleness rather than hiding it.
+#   * A disk. Free instances have ephemeral storage, so diagnosis photographs
+#     under MEDIA_ROOT are lost on every deploy and restart. The diagnosis and
+#     its verdict live in Postgres and survive; the image does not. /ready says
+#     so. Fix this before farmers rely on an officer reviewing a photo.
+#
+# Read docs/DEPLOYMENT.md before pointing a farmer's phone at this.
+
+services:
+  - type: web
+    name: agrin-node-in
+    runtime: docker
+    plan: free
+    region: singapore          # closest Render region to Punjab
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    # /health is liveness: it answers even when the node is degraded. /ready
+    # grades the dependencies and is the one a human should read -- but a node
+    # with no satellite credentials is degraded, not dead, and restarting it
+    # would fix nothing.
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+
+    envVars:
+      # --- Identity. Safe to read, so they live in the file.
+      - key: AGRIN_ENV
+        value: prod
+      - key: NODE_ID
+        value: node-in
+      - key: NODE_COUNTRY
+        value: IN
+
+      # --- Secrets. sync:false means Render prompts for the value and stores
+      #     it encrypted; nothing sensitive is ever committed here.
+      #
+      # SECRET_KEY signs every farmer's session token. Generate it with
+      #   python -c "import secrets; print(secrets.token_urlsafe(48))"
+      # and never reuse the development one: the default in config.py is
+      # literally "dev-only-insecure-key", and /ready fails the node if it is
+      # still set.
+      - key: SECRET_KEY
+        sync: false
+
+      # Neon connection string. Paste it exactly as Neon shows it, including
+      # ?sslmode=require&channel_binding=require -- app/db/url.py translates
+      # it for each driver. See the docstring there for why neither spelling
+      # works unmodified.
+      - key: DATABASE_URL
+        sync: false
+
+      # --- Copernicus Data Space, for Sentinel-2. Without these the node runs
+      #     and simply never scores crop health; /ready reports it as degraded
+      #     rather than failing.
+      - key: CDSE_CLIENT_ID
+        sync: false
+      - key: CDSE_CLIENT_SECRET
+        sync: false
+      - key: CDSE_MONTHLY_PU_CAP
+        value: "9000"
+
+      # --- Claude. Narration and the cloud diagnosis fallback. Leave unset and
+      #     the node degrades to on-device diagnosis and untranslated advice,
+      #     which is a working node, not a broken one.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CLAUDE_NARRATE_MODEL
+        value: claude-sonnet-5
+      - key: CLAUDE_VISION_MODEL
+        value: claude-opus-5
+      # The ceiling that makes a stated running cost true rather than hopeful.
+      # Both caps degrade to on-device-only, never to an error a farmer has to
+      # understand.
+      - key: LLM_MONTHLY_USD_CAP
+        value: "25"
+      - key: LLM_DAILY_CALLS_PER_USER
+        value: "20"
+
+      # --- SMS. 'console' prints the OTP to the service log instead of sending
+      #     it, which is fine while you are the only user and a hard launch
+      #     blocker the moment anyone else is: no farmer can sign in. /ready
+      #     reports it degraded. See docs/DEPLOYMENT.md for Twilio and for the
+      #     DLT-registered template India requires.
+      - key: SMS_PROVIDER
+        value: console

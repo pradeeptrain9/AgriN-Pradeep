@@ -1,0 +1,26 @@
+# What must never enter the build context.
+#
+# The first two lines are the ones that matter. A build context is uploaded
+# whole before anything is built, and .env holds this node's Anthropic key,
+# Copernicus credentials and SECRET_KEY -- sending that to a build service is
+# how a secret ends up in an image layer that outlives the deploy.
+.env
+.env.*
+
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Photographs farmers submitted for diagnosis. Never part of an image.
+media/
+
+tests/
+requirements-dev.txt
+pytest.ini
+
+# Kept: models/ is COPYed by the Dockerfile and served over
+# /models/{id}/artifact, which is how a peer node obtains this one's disease
+# classifier. Excluding it 404s the federation endpoint.
