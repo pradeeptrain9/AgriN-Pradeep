@@ -199,6 +199,30 @@ matters because several aggregators return HTTP 200 with a failure in the body.
 
 ### `console` — development only
 
+`ConsoleGateway` refuses to run when `AGRIN_ENV` is anything but `dev`,
+deliberately: the failure it prevents is a node that looks healthy in every
+check while no farmer can get past the login screen.
+
+Testing your own deployed node before you have a provider is the one legitimate
+exception, and it has its own switch:
+
+```bash
+SMS_ALLOW_CONSOLE=true
+```
+
+Codes then go to the node's own logs — on Render, the service's Logs tab — and
+nowhere else. `/ready` still reports `sms_delivery` as a **blocker**, because
+only someone with access to the host can sign in, and a farmer holding a phone
+cannot.
+
+**Do not reach for `AGRIN_ENV=dev` instead.** It is the obvious shortcut and a
+much larger hole: dev mode also returns the code in the HTTP response body
+(`api/auth.py`) and opens CORS to every origin (`main.py`). On a public URL
+that means anyone who finds the host can request a code for any phone number
+and sign in as that farmer. `SMS_ALLOW_CONSOLE` opens one door; `AGRIN_ENV=dev`
+opens the building.
+
+
 Prints the code to the log and refuses to run anywhere else.
 
 ## Registration: what actually delays a launch

@@ -64,6 +64,18 @@ async def readiness(db: AsyncSession = Depends(get_db)) -> dict:
             "sms_delivery", "degraded", "console gateway, codes printed to the log",
             "Fine for testing. Set SMS_PROVIDER before real farmers are enrolled.",
         ))
+    elif provider == "console" and settings.sms_allow_console:
+        # Still a blocker, not a warning. The operator can sign in by reading
+        # this node's logs; a farmer holding a phone cannot, and that is the
+        # only test that matters. Saying "degraded" here would let a node reach
+        # a pilot with nobody able to get past the login screen.
+        checks.append(_check(
+            "sms_delivery", "blocker",
+            "console gateway, deliberately allowed outside development",
+            "Codes go to this node's logs, so only someone with access to the "
+            "host can sign in. No farmer can. Fine while you are testing your "
+            "own node; set SMS_PROVIDER before anyone else is enrolled.",
+        ))
     elif provider == "console":
         checks.append(_check(
             "sms_delivery", "blocker", "console gateway outside development",

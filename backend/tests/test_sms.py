@@ -48,6 +48,83 @@ class TestConsoleGateway:
             await ConsoleGateway("production").send("+919876500000", "hello")
         assert "No SMS provider is configured" in str(excinfo.value)
 
+    @pytest.mark.asyncio
+    async def test_the_refusal_names_the_escape_hatch(self):
+        # Someone testing their own deployed node hits this error and needs to
+        # be told the supported way out, or they will reach for AGRIN_ENV=dev --
+        # which also returns the code in the response body and opens CORS.
+        with pytest.raises(SmsError) as excinfo:
+            await ConsoleGateway("prod").send("+919876500000", "hello")
+        assert "SMS_ALLOW_CONSOLE" in str(excinfo.value)
+
+    @pytest.mark.asyncio
+    async def test_an_explicit_flag_allows_it_outside_development(self):
+        # The one legitimate case: an operator reading codes out of their own
+        # node's logs before an SMS provider exists.
+        result = await ConsoleGateway("prod", allow_outside_dev=True).send(
+            "+919876500000", "hello"
+        )
+        assert result.accepted
+
+    @pytest.mark.asyncio
+    async def test_the_flag_has_to_be_set_on_purpose(self):
+        # Default off. A node that never heard of this flag keeps the refusal.
+        with pytest.raises(SmsError):
+            await ConsoleGateway("prod").send("+919876500000", "hello")
+
+    @pytest.mark.asyncio
+    async def test_the_code_is_never_returned_to_the_caller(self):
+        """The whole point of the flag over AGRIN_ENV=dev.
+
+        dev mode puts the OTP in the HTTP response body, so on a public URL
+        anyone can request a code for any phone number and sign in as that
+        farmer. This path logs it and returns nothing but an acknowledgement --
+        reaching the code requires access to the host's logs.
+        """
+        result = await ConsoleGateway("prod", allow_outside_dev=True).send(
+            "+919876500000", "your code is 123456"
+        )
+        assert "123456" not in str(result)
+        assert result.detail == "printed to log"
+
+
+class TestTheConsoleFlagIsNarrow:
+    """It must open exactly one door.
+
+    Structural, because the alternative failure is silent: someone later
+    extends this flag to also relax the response body or CORS, and a node that
+    an operator believed was merely logging its codes starts handing them to
+    anyone who asks.
+    """
+
+    def test_it_does_not_touch_the_response_body(self):
+        import inspect
+
+        from app.api import auth
+
+        source = inspect.getsource(auth)
+        assert "sms_allow_console" not in source, (
+            "the OTP response must depend on agrin_env alone"
+        )
+
+    def test_it_does_not_touch_cors(self):
+        import inspect
+
+        from app import main
+
+        assert "sms_allow_console" not in inspect.getsource(main)
+
+    def test_a_node_using_it_is_still_not_ready(self):
+        # An operator can sign in by reading logs; a farmer holding a phone
+        # cannot, and that is the only test that matters.
+        import inspect
+
+        from app.api import readiness
+
+        source = inspect.getsource(readiness.readiness)
+        allowed = source.split("sms_allow_console")[1][:400]
+        assert '"blocker"' in allowed
+
 
 class TestTwilioGateway:
     def test_requires_credentials(self):

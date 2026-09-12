@@ -103,3 +103,15 @@ services:
       #     DLT-registered template India requires.
       - key: SMS_PROVIDER
         value: console
+      # Lets the console gateway run on a node that is not in development, so
+      # the operator can read OTPs out of Render's logs while testing. It is
+      # NOT a way to run a pilot: only someone with dashboard access can sign
+      # in, and /ready still grades this a blocker. Set SMS_PROVIDER=twilio (or
+      # webhook) and delete this line before anyone else is enrolled.
+      #
+      # Use this rather than AGRIN_ENV=dev, which is the obvious shortcut and a
+      # far bigger hole: dev returns the OTP in the HTTP response body, so on a
+      # public URL anyone can request a code for any phone number and sign in
+      # as that farmer.
+      - key: SMS_ALLOW_CONSOLE
+        value: "true"

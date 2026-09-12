@@ -18,7 +18,9 @@ def build_gateway() -> SmsGateway:
     provider = (settings.sms_provider or "console").lower()
 
     if provider == "console":
-        return ConsoleGateway(settings.agrin_env)
+        return ConsoleGateway(
+            settings.agrin_env, allow_outside_dev=settings.sms_allow_console
+        )
     if provider == "twilio":
         return TwilioGateway(
             account_sid=settings.twilio_account_sid,

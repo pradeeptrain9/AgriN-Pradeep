@@ -48,6 +48,24 @@ class Settings(BaseSettings):
     sms_provider: str = "console"          # console | twilio | webhook
     sms_brand: str = "AgriN"
 
+    # Let the console gateway run on a node that is not in development.
+    #
+    # The console gateway normally refuses outside dev, so a node cannot sit in
+    # production looking healthy while silently unable to sign anybody in. That
+    # refusal is right and stays. This is the narrow escape hatch for the one
+    # legitimate case: a node deployed for the operator's own testing, before
+    # an SMS provider exists, where the OTP can be read from the host's logs.
+    #
+    # Deliberately NOT achieved by setting AGRIN_ENV=dev, which is the obvious
+    # shortcut and a much larger hole: dev also returns the code in the HTTP
+    # response body (api/auth.py) and opens CORS to every origin (main.py), so
+    # anyone who finds the URL can sign in as any phone number. This flag opens
+    # exactly one door and leaves those shut.
+    #
+    # /ready still grades the console gateway a blocker regardless, because a
+    # node no farmer can sign in to is not ready however deliberate it is.
+    sms_allow_console: bool = False
+
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_from_number: str = ""
