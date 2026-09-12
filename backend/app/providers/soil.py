@@ -1,10 +1,10 @@
 """Soil property resolution, with an explicit source hierarchy.
 
-VERIFIED LIMITATION (probed 2026-09-02): SoilGrids v2 returns null for every
-property over India, while returning data normally for Brazil, the USA and
-elsewhere. India is masked in the public product. An India-first pilot therefore
-cannot depend on SoilGrids, and any node that silently treats null as "no soil"
-would produce nutrient advice from nothing.
+VERIFIED LIMITATION (probed 2026-09-02, confirmed 2026-09-12): SoilGrids v2
+returns null for every property over India, while returning data normally for
+Brazil, the USA and elsewhere. India is masked in the public product. An
+India-first pilot therefore cannot depend on SoilGrids, and any node that
+silently treats null as "no soil" would produce nutrient advice from nothing.
 
 So soil is resolved through a priority chain, and every result carries its own
 provenance and confidence so the advisory can say where the numbers came from:
@@ -12,7 +12,14 @@ provenance and confidence so the advisory can say where the numbers came from:
   1. SOIL_HEALTH_CARD  farmer-entered government card values      (high)
   2. FEEL_TEST         in-app ribbon test, texture only           (medium)
   3. SOILGRIDS         global 250 m raster, null over India       (medium)
-  4. FALLBACK          regional default texture, flagged          (low)
+  4. BHUVAN            ISRO national soil map, texture only       (low)
+  5. FALLBACK          regional default texture, flagged          (low)
+
+Bhuvan exists because step 3 is empty for every field in India, which made
+step 5 the answer nationwide -- and step 5 assumes loam. On a real Punjab field
+ISRO's map says coarse texture, loamy sand, which holds 80 mm of available
+water per metre against loam's 130. Assuming loam there overstates the store by
+more than half and tells a farmer they have water the soil does not hold.
 
 The chain degrades rather than failing: the water balance always gets a texture,
 but the advisory tells the farmer how much to trust it.
@@ -25,6 +32,7 @@ from enum import Enum
 import httpx
 
 from app.engine.soil_texture import TextureClass, classify_texture
+from app.providers import bhuvan
 
 SOILGRIDS_URL = "https://rest.isric.org/soilgrids/v2.0/properties/query"
 USER_AGENT = "AgriN/0.1 (digital public good; agriculture advisory node)"
@@ -47,6 +55,7 @@ class SoilSource(str, Enum):
     SOIL_HEALTH_CARD = "soil_health_card"
     FEEL_TEST = "feel_test"
     SOILGRIDS = "soilgrids"
+    BHUVAN = "bhuvan"
     FALLBACK = "fallback"
 
 
@@ -54,6 +63,10 @@ CONFIDENCE = {
     SoilSource.SOIL_HEALTH_CARD: "high",
     SoilSource.FEEL_TEST: "medium",
     SoilSource.SOILGRIDS: "medium",
+    # A texture class from a 1:250,000 national map, not a reading of this
+    # field: the polygon that answers can span several states. Above a bare
+    # assumption, below anything measured.
+    SoilSource.BHUVAN: "low",
     SoilSource.FALLBACK: "low",
 }
 
@@ -309,7 +322,30 @@ async def resolve_soil(
     try:
         profile = await fetch_soilgrids(lat, lon, client=client)
     except SoilGridsUnavailable:
-        return fallback_profile("SoilGrids unreachable")
-    if profile is None:
-        return fallback_profile("SoilGrids has no coverage at this location")
-    return profile
+        profile = None
+    if profile is not None:
+        return profile
+
+    # SoilGrids is masked over the whole of India, so for an India node this is
+    # not an edge case -- it is every field. Bhuvan is ISRO's national layer
+    # and covers the country. See providers/bhuvan.py for what it is and is
+    # not.
+    try:
+        found = await bhuvan.fetch_texture(lat, lon)
+    except bhuvan.BhuvanUnavailable:
+        found = None
+    if found is not None:
+        texture, descr = found
+        return SoilProfile(
+            source=SoilSource.BHUVAN,
+            texture=texture,
+            notes=[
+                f"Soil texture from the national soil map (ISRO Bhuvan): "
+                f"{descr.lower()}, read as {texture.name}. That map is drawn at "
+                "1:250,000, so it describes the area rather than this field. "
+                "A Soil Health Card would replace it with a measurement of "
+                "your own soil."
+            ],
+        )
+
+    return fallback_profile("no soil map covers this location")
