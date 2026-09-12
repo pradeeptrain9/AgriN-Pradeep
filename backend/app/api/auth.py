@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db.session import get_db
+from app.demo import is_demo_phone
 from app.schemas import OtpRequest, OtpVerify, TokenResponse
 from app.security import (
     create_access_token,
@@ -44,7 +45,13 @@ async def request_otp(payload: OtpRequest, db: AsyncSession = Depends(get_db)) -
             detail="A code was just sent. Wait a moment before asking for another.",
         )
 
-    code = generate_otp()
+    # The demo account gets its fixed code stored exactly as a real one would
+    # be, so verification, expiry and the attempt cap below are untouched. The
+    # only difference is that no gateway is called -- the whole point is a node
+    # with no SMS provider.
+    demo = is_demo_phone(payload.phone, settings)
+    code = settings.demo_code if demo else generate_otp()
+
     await db.execute(
         text(
             "INSERT INTO otp_codes (phone, code_hash, expires_at) "
@@ -57,9 +64,14 @@ async def request_otp(payload: OtpRequest, db: AsyncSession = Depends(get_db)) -
         },
     )
     await db.commit()
-    await send_otp(payload.phone, code)
+    if not demo:
+        await send_otp(payload.phone, code)
 
     response = {"sent": True, "expires_in": settings.otp_ttl_seconds}
+    if demo:
+        # Says the door was used, never what the code is. Whoever is meant to
+        # have it was given it out of band.
+        response["demo_account"] = True
     if settings.agrin_env == "dev":
         # Convenience for local testing only; never returned outside dev.
         response["dev_code"] = code

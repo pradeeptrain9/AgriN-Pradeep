@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db.session import get_db
+from app.demo import demo_login_enabled, normalise_phone
 
 router = APIRouter(tags=["meta"])
 
@@ -94,6 +95,41 @@ async def readiness(db: AsyncSession = Depends(get_db)) -> dict:
                 f"{provider} gateway misconfigured: {exc}",
                 "No farmer can sign in until this is fixed.",
             ))
+
+    # --- demo login: a deliberate open door, reported as one
+    if demo_login_enabled(settings):
+        # Degraded while this node is only being evaluated; a blocker the moment
+        # anyone else has an account, because then a published code sits on a
+        # node holding somebody's real fields. The node works this out for
+        # itself rather than trusting the operator to remember.
+        others = await db.execute(
+            text("SELECT count(*) FROM users WHERE phone <> :phone"),
+            {"phone": normalise_phone(settings.demo_phone)},
+        )
+        other_accounts = others.scalar() or 0
+        if other_accounts:
+            checks.append(_check(
+                "demo_login", "blocker",
+                f"enabled, and {other_accounts} other account(s) exist on this node",
+                "A fixed, published sign-in code is open on a node that now "
+                "holds other people's data. Unset DEMO_PHONE and DEMO_CODE.",
+            ))
+        else:
+            checks.append(_check(
+                "demo_login", "degraded", "enabled for one allowlisted number",
+                "Anyone holding the published code can sign in as that account. "
+                "Acceptable only while this node is being evaluated and has no "
+                "farmers on it. Unset DEMO_PHONE and DEMO_CODE before it does.",
+            ))
+    elif settings.demo_phone or settings.demo_code:
+        # Half-configured fails closed, which is right, but silently -- and
+        # someone is about to wonder why the login they were given does not
+        # work.
+        checks.append(_check(
+            "demo_login", "degraded", "half-configured, so disabled",
+            "DEMO_PHONE and DEMO_CODE must both be set, and the code must be "
+            "six digits. As it stands the demo account cannot sign in.",
+        ))
 
     # --- satellite
     if not settings.cdse_client_id or not settings.cdse_client_secret:

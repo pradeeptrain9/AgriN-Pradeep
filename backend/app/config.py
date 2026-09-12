@@ -87,6 +87,13 @@ class Settings(BaseSettings):
     otp_ttl_seconds: int = 300
     otp_max_attempts: int = 5
 
+    # One allowlisted account that signs in with a fixed code and no SMS, so a
+    # node with no provider can still be evaluated. Both must be set or the door
+    # does not exist, and /ready calls it a blocker once any other account is on
+    # the node. See app/demo.py.
+    demo_phone: str = ""
+    demo_code: str = ""
+
     media_root: str = "./media"
 
 

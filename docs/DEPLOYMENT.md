@@ -225,6 +225,47 @@ opens the building.
 
 Prints the code to the log and refuses to run anywhere else.
 
+### The demo account — for evaluation, never for a pilot
+
+`SMS_ALLOW_CONSOLE` lets *you* sign in by reading your own logs. It does nothing
+for someone you hand the app to: they reach the login screen and stop. That is
+the correct behaviour for a farmer and useless for a reviewer, a judge, or a
+ministry official you want to try the thing.
+
+One allowlisted number fixes that:
+
+```bash
+DEMO_PHONE=+919876543210
+DEMO_CODE=404404
+```
+
+Requesting a code for that number stores the fixed code instead of a random one
+and skips the gateway entirely. **Verification is untouched** — the stored hash
+is built exactly as any other code's is, so expiry, the five-attempt cap, the
+single-use rule and the 30-second resend interval all still apply. There is no
+branch for the demo account in `verify()`, which is why none of those properties
+have to be re-argued.
+
+Publish the number and the code to the people meant to have them. The node never
+returns the code in a response; `{"demo_account": true}` says the door was used
+and nothing more.
+
+**This is a deliberate open door and the node treats it as one:**
+
+| | |
+|---|---|
+| Fails closed | Both variables must be set and the code must be six digits. One stray export opens nothing. |
+| Exactly one number | Not a prefix, not a range. A number one digit away goes to the real gateway. |
+| Self-policing | `/ready` reports `demo_login` as **degraded** while this node has no other accounts, and escalates it to a **blocker** the moment any other account exists — a published sign-in code must not sit on a node holding somebody's real fields. |
+
+Unset both before a pilot. The node will tell you if you forget, but do not make
+it have to.
+
+Compared with the two nearby shortcuts: `SMS_ALLOW_CONSOLE` opens one door to
+whoever can read the logs; `DEMO_PHONE` opens one door to whoever holds one
+published code; `AGRIN_ENV=dev` opens every door to everybody. Only the first
+two are defensible, and only on a node with no farmers on it.
+
 ## Registration: what actually delays a launch
 
 The integration is an afternoon. Registration is weeks, and it is

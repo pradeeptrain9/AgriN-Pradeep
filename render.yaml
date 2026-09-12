@@ -115,3 +115,23 @@ services:
       # as that farmer.
       - key: SMS_ALLOW_CONSOLE
         value: "true"
+
+      # --- One allowlisted account that signs in with a fixed code and no SMS.
+      #
+      # Exists so a node with no SMS provider can still be handed to someone to
+      # evaluate. Without it a reviewer installs the app, reaches the login
+      # screen and stops, because codes only reach this node's logs.
+      #
+      # It is a deliberate open door for exactly one number. Both variables must
+      # be set or it does not exist, the code must be six digits, and /ready
+      # escalates it from degraded to blocker the moment any other account
+      # exists on this node -- a published code must not sit on a node holding
+      # somebody's real fields. Unset both before a pilot.
+      #
+      # The code is never returned in a response; hand it to the people meant to
+      # have it. Narrower than SMS_ALLOW_CONSOLE (one number, not the log) and
+      # far narrower than AGRIN_ENV=dev (which opens every number).
+      - key: DEMO_PHONE
+        sync: false
+      - key: DEMO_CODE
+        sync: false
