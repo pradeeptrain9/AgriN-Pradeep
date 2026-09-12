@@ -119,3 +119,47 @@ class TestItDoesNotMangleTheRest:
         # SSL parameters at all.
         assert "localhost:5433/agrin" in translate(LOCAL)
         assert "ssl" not in translate(LOCAL)
+
+
+class TestPooledEndpoints:
+    """A managed provider's pooled endpoint is PgBouncer in transaction mode.
+
+    Measured against PgBouncer 1.25, this stack splits cleanly in two:
+
+      * SQLAlchemy's asyncpg dialect is immune. Twelve concurrent workers
+        through the pooler, with pooler-side prepared-statement support
+        switched off, produced no failures at all -- the dialect does its own
+        statement handling. The request path needs nothing, which is the
+        opposite of what most write-ups on this claim.
+      * Raw asyncpg is not. `python -m app.db.migrate` against a pooled DSN
+        dies with DuplicatePreparedStatementError: prepared statement
+        "__asyncpg_stmt_3__" already exists -- transaction pooling hands each
+        transaction a different server connection, and asyncpg's per-client
+        statement names collide with what a previous client left behind.
+
+    That failure is at the worst moment: `set -e` in docker-entrypoint.sh
+    aborts before uvicorn ever starts, so a node handed a pooler URL never
+    serves at all.
+    """
+
+    def test_migrations_do_not_cache_prepared_statements(self):
+        # The one line standing between a pooler URL and a container that
+        # cannot boot. Structural because the alternative is a live PgBouncer
+        # in the unit suite.
+        import inspect
+
+        from app.db import migrate
+
+        source = inspect.getsource(migrate.run)
+        assert "statement_cache_size=0" in source
+
+    def test_a_pooler_host_survives_translation_unchanged(self):
+        # The hostname is the only thing distinguishing the two endpoints, and
+        # nothing here may rewrite it -- pointing a node at the wrong one is a
+        # silent change of connection semantics.
+        pooled = (
+            "postgresql://u:p@ep-snowy-scene-123-pooler.c-4.ap-southeast-1"
+            ".aws.neon.tech/neondb?sslmode=require"
+        )
+        assert "-pooler.c-4.ap-southeast-1.aws.neon.tech" in sqlalchemy_url(pooled)
+        assert "-pooler.c-4.ap-southeast-1.aws.neon.tech" in asyncpg_dsn(pooled)

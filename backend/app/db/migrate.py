@@ -24,7 +24,29 @@ def _dsn() -> str:
 
 
 async def run() -> None:
-    conn = await asyncpg.connect(_dsn())
+    # statement_cache_size=0 because a managed provider's *pooled* endpoint is
+    # PgBouncer in transaction mode, which hands each transaction a different
+    # server connection. asyncpg caches prepared statements per client
+    # connection and names them __asyncpg_stmt_N__, so the Nth statement
+    # collides with one a previous client left on that server connection:
+    #
+    #   DuplicatePreparedStatementError: prepared statement
+    #   "__asyncpg_stmt_3__" already exists
+    #
+    # Measured against PgBouncer 1.25 in transaction mode: this exact call
+    # fails on a pooled DSN and succeeds on a direct one. `set -e` in the
+    # entrypoint then aborts the container before it ever serves, so a node
+    # given a pooler URL simply never starts.
+    #
+    # Unconditional rather than detected from the hostname: migrations run once
+    # per boot and prepare each statement once, so the cache was worth nothing
+    # here even on a direct connection.
+    #
+    # SQLAlchemy's asyncpg dialect is NOT affected -- it does its own prepared
+    # statement handling, and 12 concurrent workers through the same pooler
+    # with pooler-side support disabled produced no failures at all. The
+    # request path needs nothing.
+    conn = await asyncpg.connect(_dsn(), statement_cache_size=0)
     try:
         await conn.execute(
             "CREATE TABLE IF NOT EXISTS schema_migrations ("
