@@ -41,6 +41,15 @@ CLIMATE_WINDOW_DAYS = 180
 
 SUGGESTION_VERSION = "crop-choice-1.0.0"
 
+# The source the rainfall figure is normally built from.
+PRIMARY_WEATHER_SOURCE = "open-meteo"
+
+# Below this share of the window, a fallback source is not worth mentioning.
+# The archive and forecast fall back independently, so a single day out of 180
+# arriving from elsewhere is the common case and means nothing for a seasonal
+# total.
+FALLBACK_SHARE_WORTH_MENTIONING = 0.1
+
 
 async def _climate(db: AsyncSession, field_id: str, today: date) -> dict:
     """Recent rainfall and evaporative demand for this field."""
@@ -56,7 +65,14 @@ async def _climate(db: AsyncSession, field_id: str, today: date) -> dict:
             # does not". A total summed across both is a number with a step
             # change in the middle of it.
             "       count(DISTINCT source) AS source_count, "
-            "       string_agg(DISTINCT source, \', \') AS sources "
+            "       string_agg(DISTINCT source, \', \') AS sources, "
+            # Days, not distinct names. The archive and the forecast are
+            # fetched separately and only one of them may have fallen back --
+            # which typically means a single day of a 180-day window came from
+            # elsewhere. Warning about that would be true and useless, and a
+            # warning that fires when nothing is wrong is one a farmer learns
+            # to scroll past before the day it matters.
+            "       count(*) FILTER (WHERE source <> :primary) AS fallback_days "
             "FROM weather_daily "
             "WHERE field_id = :id AND time >= :since AND time <= :today"
         ),
@@ -64,6 +80,7 @@ async def _climate(db: AsyncSession, field_id: str, today: date) -> dict:
             "id": field_id,
             "since": today - timedelta(days=CLIMATE_WINDOW_DAYS),
             "today": today,
+            "primary": PRIMARY_WEATHER_SOURCE,
         },
     )
     row = result.mappings().first()
@@ -73,6 +90,7 @@ async def _climate(db: AsyncSession, field_id: str, today: date) -> dict:
         "mean_et0": float(row["mean_et0"] or 0.0),
         "source_count": int(row["source_count"] or 0),
         "sources": row["sources"] or "",
+        "fallback_days": int(row["fallback_days"] or 0),
     }
 
 
@@ -114,7 +132,10 @@ async def suggest_crops(
             "treat the order as provisional."
         )
 
-    if climate["source_count"] > 1:
+    fallback_share = (
+        climate["fallback_days"] / climate["days"] if climate["days"] else 0.0
+    )
+    if fallback_share >= FALLBACK_SHARE_WORTH_MENTIONING and climate["source_count"] > 1:
         gaps.append(
             "This field's weather came from more than one provider "
             f"({climate['sources']}), because the usual one could not be "
@@ -122,7 +143,7 @@ async def suggest_crops(
             "same season several per cent wetter than another — so treat the "
             "rainfall figure as approximate."
         )
-    elif climate["days"] > 0 and "open-meteo" not in climate["sources"]:
+    elif climate["days"] > 0 and PRIMARY_WEATHER_SOURCE not in climate["sources"]:
         gaps.append(
             f"This field's weather came from {climate['sources']} rather than "
             "the usual source, which could not be reached. It is a coarser "

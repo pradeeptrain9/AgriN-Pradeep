@@ -35,15 +35,21 @@ class FakeDb:
     """Answers the two queries suggest_crops makes, in order."""
 
     def __init__(self, *, days, rain_mm, mean_et0, previous=None,
-                 sources="open-meteo"):
+                 sources="open-meteo", fallback_days=None):
+        names = [s for s in sources.split(", ") if s]
+        if fallback_days is None:
+            # Default: everything that is not the primary source. Tests that
+            # care about the threshold pass an explicit count.
+            fallback_days = 0 if names == ["open-meteo"] else days
         self._climate = {
             "days": days, "rain_mm": rain_mm, "mean_et0": mean_et0,
             # Which provider the rainfall came from. Not decoration: the
             # sources disagree by tens of per cent on seasonal rainfall, so a
             # total stitched from two of them is a number with a step change
             # in the middle.
-            "source_count": len([s for s in sources.split(", ") if s]),
+            "source_count": len(names),
             "sources": sources,
+            "fallback_days": fallback_days,
         }
         self._previous = previous
         self.queries = []
@@ -212,9 +218,11 @@ class TestWhereTheWeatherCameFrom:
     """
 
     async def test_a_mixed_history_is_declared(self):
+        # Half the window from each: a seasonal rainfall total genuinely built
+        # from two models that disagree by tens of per cent.
         out = await _suggest(
             days=180, rain_mm=600.0, mean_et0=4.8,
-            sources="nasa-power, open-meteo",
+            sources="nasa-power, open-meteo", fallback_days=90,
         )
         gap = next((g for g in out["gaps"] if "more than one provider" in g), None)
         assert gap is not None
@@ -241,3 +249,40 @@ class TestWhereTheWeatherCameFrom:
         out = await _suggest(days=0, rain_mm=0.0, mean_et0=0.0, sources="")
         assert not any("coarser" in g for g in out["gaps"])
         assert any("No weather data" in g for g in out["gaps"])
+
+
+@pytest.mark.asyncio
+class TestTheWarningStaysWorthReading:
+    """The archive and the forecast fall back independently.
+
+    The common case on a rate-limited node is that the archive is fine and only
+    today's forecast row came from elsewhere -- one day out of a hundred and
+    eighty. Warning that the rainfall total is approximate because of that
+    would be technically true and practically corrosive: a warning that fires
+    when nothing is wrong is one a farmer learns to scroll past, and it is then
+    gone on the day it would have mattered.
+    """
+
+    async def test_a_single_fallback_day_is_not_worth_mentioning(self):
+        out = await _suggest(
+            days=180, rain_mm=600.0, mean_et0=4.8,
+            sources="met-no, open-meteo", fallback_days=1,
+        )
+        assert not any("more than one provider" in g for g in out["gaps"])
+
+    async def test_a_material_share_is_mentioned(self):
+        out = await _suggest(
+            days=180, rain_mm=600.0, mean_et0=4.8,
+            sources="nasa-power, open-meteo", fallback_days=60,
+        )
+        assert any("more than one provider" in g for g in out["gaps"])
+
+    async def test_the_threshold_is_a_share_not_a_count(self):
+        # Twelve days matters in a fortnight of history and does not in six
+        # months, so the test has to be relative.
+        thin = await _suggest(days=20, rain_mm=60.0, mean_et0=4.8,
+                              sources="nasa-power, open-meteo", fallback_days=12)
+        long = await _suggest(days=180, rain_mm=600.0, mean_et0=4.8,
+                              sources="nasa-power, open-meteo", fallback_days=12)
+        assert any("more than one provider" in g for g in thin["gaps"])
+        assert not any("more than one provider" in g for g in long["gaps"])
