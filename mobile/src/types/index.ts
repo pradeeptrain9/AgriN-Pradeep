@@ -201,3 +201,16 @@ export interface CropSuggestions {
   choice_is_open: boolean;
   gaps: string[];
 }
+
+export interface Basemap {
+  provider: string;
+  tile_url: string;
+  attribution: string;
+  max_zoom: number;
+  /**
+   * Whether the tiles are imagery. A boundary is traced differently on a
+   * street map -- there is nothing to align a field edge to -- so the screen
+   * says so rather than letting a farmer believe they matched their own hedge.
+   */
+  satellite: boolean;
+}

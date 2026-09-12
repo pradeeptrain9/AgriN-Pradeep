@@ -404,3 +404,24 @@ class TestEveryConfiguredModelHasAPrice:
         source = (pathlib.Path(__file__).resolve().parents[2]
                   / "app" / "api" / "readiness.py").read_text()
         assert "has no price in ai/budget.py" in source
+
+
+class TestBasemapSessionShape:
+    """`overlay` decides whether the node gets a map or a label layer.
+
+    With overlay=true Google returns the roadmap layer as a separate
+    transparent tile set, meant to be drawn over imagery fetched from a second
+    session. A client holding one session then draws village names and roads
+    over its own background colour and no imagery at all -- while the node
+    reports provider=google-satellite and everything looks deliberate.
+    """
+
+    def test_the_roadmap_layer_is_baked_into_the_imagery(self):
+        from app.providers.basemap import _session_body
+
+        body = _session_body("en", "IN")
+        assert body["mapType"] == "satellite"
+        assert body["layerTypes"] == ["layerRoadmap"]
+        assert body["overlay"] is False, (
+            "overlay=True returns labels on transparency, not a basemap"
+        )

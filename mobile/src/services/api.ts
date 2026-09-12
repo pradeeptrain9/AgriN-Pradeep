@@ -11,8 +11,8 @@ import axios, { AxiosError } from 'axios';
 import { useAuthStore } from '../store/authSlice';
 import { currentNodeUrl } from './node';
 import type {
-  Advisory, CropSuggestions, Diagnosis, Field, FieldSource, FieldWeather, GeoJsonPolygon,
-  Narration,
+  Advisory, Basemap, CropSuggestions, Diagnosis, Field, FieldSource, FieldWeather,
+  GeoJsonPolygon, Narration,
 } from '../types';
 
 /**
@@ -217,4 +217,17 @@ export const getFieldWeather = async (fieldId: string, days = 7) => {
 export const getCropSuggestions = async (fieldId: string) => {
   const { data } = await api.get(`/fields/${fieldId}/crop-suggestions`);
   return data as CropSuggestions;
+};
+
+/**
+ * Which basemap this node wants drawn.
+ *
+ * The node chooses, not the app: it holds the Map Tiles key, it pays for the
+ * session, and a node deployed somewhere else may serve its own tiles entirely.
+ * Hard-coding OpenStreetMap in the client made that choice unreachable -- the
+ * node was serving satellite imagery and the phone kept drawing streets.
+ */
+export const getBasemap = async (): Promise<Basemap> => {
+  const { data } = await api.get('/basemap');
+  return data;
 };

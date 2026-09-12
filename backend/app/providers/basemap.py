@@ -81,7 +81,16 @@ def _session_body(language: str, region: str) -> dict:
         # Imagery alone has no labels, and a farmer orienting themselves needs
         # the village name. Roads over satellite is the readable combination.
         "layerTypes": ["layerRoadmap"],
-        "overlay": True,
+        # false, and the difference is the whole feature. `overlay: true` asks
+        # for the roadmap layer as a SEPARATE transparent tile set, to be drawn
+        # over imagery fetched from a second session -- so a client with one
+        # session gets roads and village names on a blank background and no
+        # imagery at all. That is what shipped: the node reported
+        # provider=google-satellite, the app drew labels over its own pale
+        # green, and it looked like a styling choice rather than a missing map.
+        # false bakes the labels into the imagery, which is one tile set and
+        # the readable combination.
+        "overlay": False,
         "highDpi": False,
     }
 

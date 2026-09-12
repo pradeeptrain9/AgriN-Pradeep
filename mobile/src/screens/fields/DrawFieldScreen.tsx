@@ -31,6 +31,7 @@ import { BoundaryTrace } from '../../components/map/BoundaryTrace';
 import { FieldMapView } from '../../components/map/FieldMapView';
 import { DRAW_LIMITS } from '../../constants/config';
 import { colors, radius, spacing, touch, type } from '../../constants/theme';
+import { useBasemap } from '../../hooks/useBasemap';
 import { enqueue, insertLocalField, newLocalId } from '../../db';
 import { createField, isOffline, readableError } from '../../services/api';
 import { downloadFieldTiles } from '../../services/offlineTiles';
@@ -58,6 +59,7 @@ export const DrawFieldScreen: React.FC<{ navigation: any }> = ({ navigation }) =
   const [saving, setSaving] = useState(false);
   const [center, setCenter] = useState<[number, number] | null>(null);
 
+  const basemap = useBasemap();
   const fields = useFieldStore((s) => s.fields);
   const upsert = useFieldStore((s) => s.upsert);
 
@@ -222,6 +224,18 @@ export const DrawFieldScreen: React.FC<{ navigation: any }> = ({ navigation }) =
         satellite advice will be real for these coordinates, but the size will
         only be as accurate as your corners.
       </Text>
+
+      {/* On a street map there is no hedge, no bund and no field edge to tap
+          against, so the corners are a guess -- and that guess multiplies every
+          per-hectare figure in the advice. Say it rather than let the map imply
+          a precision it cannot give. */}
+      {!basemap.satellite ? (
+        <Text style={styles.notice}>
+          This map shows roads, not your crop. Without satellite imagery there
+          is no field edge to tap against, so walk the boundary instead if the
+          size needs to be right.
+        </Text>
+      ) : null}
 
       <View style={styles.stats}>
         <Stat label="corners" value={String(corners.length)} />

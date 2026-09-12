@@ -9,9 +9,13 @@
  * TILE POLICY, read before scaling: openstreetmap.org tiles are a donated
  * service with a usage policy that forbids bulk downloading and heavy automated
  * use. That is fine for a pilot of tens of farmers and NOT fine for a national
- * rollout. A production node serves its own basemap -- self-hosted raster tiles
- * or a PMTiles archive -- and points BASEMAP_TILE_URL at itself. The switch is
- * this one constant.
+ * rollout.
+ *
+ * Which is why the tile URL is no longer a constant here. The node decides --
+ * see services/basemap.ts -- and serves Google satellite imagery when it holds
+ * a Map Tiles key, its own tiles when it is deployed at scale, and these
+ * OpenStreetMap tiles when it holds neither. The values below are the fallback,
+ * not the policy.
  */
 
 import { RASTER_TILE_URL, TILE_ATTRIBUTION } from './config';
@@ -23,16 +27,25 @@ export const BASEMAP_TILE_URL = RASTER_TILE_URL;
  * arrives and stays visible when none ever do. A farmer mapping a boundary with
  * no signal still sees their track drawn on a plain ground rather than a void.
  */
-export const rasterStyle = (tileUrl: string = BASEMAP_TILE_URL) => ({
+export const rasterStyle = (
+  tileUrl: string = BASEMAP_TILE_URL,
+  attribution: string = TILE_ATTRIBUTION,
+  maxZoom: number = 19,
+) => ({
   version: 8,
   name: 'AgriN basemap',
   sources: {
+    // The source id stays 'osm' across providers. Renaming it on every switch
+    // would give MapLibre a different style graph for the same map and throw
+    // away the tiles already decoded on screen.
     osm: {
       type: 'raster',
       tiles: [tileUrl],
       tileSize: 256,
-      maxzoom: 19,
-      attribution: TILE_ATTRIBUTION,
+      maxzoom: maxZoom,
+      // Whose tiles these are. A licence condition, not decoration, so it
+      // travels with the URL rather than being fixed in the component.
+      attribution,
     },
   },
   layers: [
@@ -40,6 +53,3 @@ export const rasterStyle = (tileUrl: string = BASEMAP_TILE_URL) => ({
     { id: 'osm', type: 'raster', source: 'osm', paint: { 'raster-opacity': 1 } },
   ],
 });
-
-/** Satellite imagery would be better for field edges but every free source is keyed. */
-export const SATELLITE_AVAILABLE = false;

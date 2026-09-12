@@ -14,6 +14,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { MAP_DEFAULTS } from '../../constants/config';
 import { rasterStyle } from '../../constants/mapStyle';
 import { colors, radius, spacing, type } from '../../constants/theme';
+import { useBasemap } from '../../hooks/useBasemap';
 import { useDeviceTier } from '../../hooks/useDeviceTier';
 
 interface Props {
@@ -33,12 +34,13 @@ export const FieldMapView: React.FC<Props> = ({
 }) => {
   const cameraRef = useRef<any>(null);
   const tier = useDeviceTier();
+  const basemap = useBasemap();
 
   return (
     <View style={styles.container}>
       <MapView
         style={styles.map}
-        mapStyle={rasterStyle()}
+        mapStyle={rasterStyle(basemap.tile_url, basemap.attribution, basemap.max_zoom)}
         // MapLibre hands back a GeoJSON Feature. Unwrapping it here keeps every
         // screen dealing in plain [lon, lat] positions, which is what the geo
         // utilities and the GeoJSON ring both already speak.
@@ -79,7 +81,7 @@ export const FieldMapView: React.FC<Props> = ({
       </MapView>
 
       {attributionNote ? (
-        <Text style={styles.attribution}>© OpenStreetMap contributors</Text>
+        <Text style={styles.attribution}>{basemap.attribution}</Text>
       ) : null}
     </View>
   );

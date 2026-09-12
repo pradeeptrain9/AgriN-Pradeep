@@ -9,12 +9,24 @@
  * hundred kilobytes; the same range over a district is hundreds of megabytes and
  * would both fill a cheap phone and violate the OpenStreetMap tile usage policy.
  * The bounding box is the field plus a small margin, never a region.
+ *
+ * ALWAYS OpenStreetMap, even when the node serves Google satellite imagery on
+ * screen. Google Maps Platform terms permit only temporary caching of tiles and
+ * forbid storing them for offline use; an offline pack is exactly the storage
+ * they forbid, and the session token inside the URL would expire in the pack
+ * anyway and leave a farmer with grey squares. The live map follows the node
+ * (services/basemap.ts); what gets written to disk does not.
  */
 
 import { OfflineManager } from '@maplibre/maplibre-react-native';
 
+import { RASTER_TILE_URL, TILE_ATTRIBUTION } from '../constants/config';
 import { rasterStyle } from '../constants/mapStyle';
 import type { GeoJsonPolygon } from '../types';
+
+/** Named so a future edit has to notice it is not the node's basemap. */
+const OFFLINE_TILE_URL = RASTER_TILE_URL;
+const OFFLINE_ATTRIBUTION = TILE_ATTRIBUTION;
 
 const MIN_ZOOM = 13;
 const MAX_ZOOM = 17;
@@ -70,7 +82,10 @@ export const downloadFieldTiles = async (
     await OfflineManager.createPack(
       {
         name,
-        styleURL: JSON.stringify(rasterStyle()),
+        // Named constants, not the node's basemap, and not the bare default
+        // either -- so removing this line has to be a decision. Licence note
+        // above.
+        styleURL: JSON.stringify(rasterStyle(OFFLINE_TILE_URL, OFFLINE_ATTRIBUTION)),
         bounds: [bounds.ne, bounds.sw],
         minZoom: MIN_ZOOM,
         maxZoom: MAX_ZOOM,
