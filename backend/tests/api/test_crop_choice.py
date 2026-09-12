@@ -34,8 +34,17 @@ class FakeResult:
 class FakeDb:
     """Answers the two queries suggest_crops makes, in order."""
 
-    def __init__(self, *, days, rain_mm, mean_et0, previous=None):
-        self._climate = {"days": days, "rain_mm": rain_mm, "mean_et0": mean_et0}
+    def __init__(self, *, days, rain_mm, mean_et0, previous=None,
+                 sources="open-meteo"):
+        self._climate = {
+            "days": days, "rain_mm": rain_mm, "mean_et0": mean_et0,
+            # Which provider the rainfall came from. Not decoration: the
+            # sources disagree by tens of per cent on seasonal rainfall, so a
+            # total stitched from two of them is a number with a step change
+            # in the middle.
+            "source_count": len([s for s in sources.split(", ") if s]),
+            "sources": sources,
+        }
         self._previous = previous
         self.queries = []
 
@@ -187,3 +196,48 @@ class TestWaterFitBites:
                 dry_by_code[code]["components"]["water_fit"]
                 < wet_by_code[code]["components"]["water_fit"]
             )
+
+
+@pytest.mark.asyncio
+class TestWhereTheWeatherCameFrom:
+    """Open-Meteo rate-limits per IP, and on shared hosting that IP belongs to
+    the platform -- so a node can be refused over traffic it had no part in and
+    fall back to NASA POWER or MET Norway.
+
+    Those sources are not interchangeable. Measured at one Punjab field, POWER
+    returns 28% more seasonal rainfall than ERA5, which is the difference
+    between "the rain covers this crop" and "it does not". The farmer is shown
+    a single number here; when it rests on a weaker or mixed basis, the screen
+    has to say so.
+    """
+
+    async def test_a_mixed_history_is_declared(self):
+        out = await _suggest(
+            days=180, rain_mm=600.0, mean_et0=4.8,
+            sources="nasa-power, open-meteo",
+        )
+        gap = next((g for g in out["gaps"] if "more than one provider" in g), None)
+        assert gap is not None
+        assert "approximate" in gap
+
+    async def test_a_fallback_only_history_is_declared(self):
+        out = await _suggest(days=180, rain_mm=600.0, mean_et0=4.8,
+                             sources="nasa-power")
+        assert any("coarser grid" in g for g in out["gaps"])
+
+    async def test_the_usual_source_raises_nothing(self):
+        # A node working normally must not nag about provenance on every visit.
+        out = await _suggest(days=180, rain_mm=600.0, mean_et0=4.8)
+        assert not any("provider" in g or "coarser" in g for g in out["gaps"])
+
+    async def test_it_still_answers_on_a_fallback(self):
+        # Declaring a weaker basis is not a reason to withhold the ranking --
+        # that would leave the farmer exactly where they started.
+        out = await _suggest(days=180, rain_mm=600.0, mean_et0=4.8,
+                             sources="nasa-power")
+        assert out["suggestions"]
+
+    async def test_no_weather_at_all_does_not_claim_a_source(self):
+        out = await _suggest(days=0, rain_mm=0.0, mean_et0=0.0, sources="")
+        assert not any("coarser" in g for g in out["gaps"])
+        assert any("No weather data" in g for g in out["gaps"])

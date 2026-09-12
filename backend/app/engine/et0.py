@@ -94,6 +94,37 @@ def clear_sky_radiation(ra: float, elevation_m: float) -> float:
     return (0.75 + 2e-5 * elevation_m) * ra
 
 
+# Interior locations, where land mass dominates and air masses are dry. FAO-56
+# gives 0.19 for coastal sites; 0.16 is the interior value and the safer
+# default for the inland districts this node is built for.
+K_RS_INTERIOR = 0.16
+
+
+def solar_radiation_from_temperature_range(
+    tmax_c: float, tmin_c: float, ra: float, *, k_rs: float = K_RS_INTERIOR,
+    elevation_m: float = 0.0,
+) -> float:
+    """Rs estimated from the daily temperature range. Eq. 50.
+
+    For forecast sources that publish temperature, humidity and wind but no
+    solar radiation. The physical argument is that a clear day heats and cools
+    further than a cloudy one, so (Tmax - Tmin) stands in for cloud cover.
+
+    This is genuinely less accurate than a measured or modelled Rs, and the
+    error is not random: a run of cloudy days with a small diurnal range
+    underestimates Rs and therefore ET0, which understates how much water a
+    crop needs. Anything computed from it must be labelled with the source it
+    came from so the difference is visible rather than assumed away.
+
+    Clamped to clear-sky radiation, because Eq. 50 is an empirical fit and a
+    large range in dry air can otherwise put Rs above what physics allows.
+    """
+    if tmax_c < tmin_c:
+        tmax_c, tmin_c = tmin_c, tmax_c
+    rs = k_rs * math.sqrt(tmax_c - tmin_c) * ra
+    return min(rs, clear_sky_radiation(ra, elevation_m))
+
+
 def net_shortwave(rs: float, albedo: float = ALBEDO_GRASS) -> float:
     """Rns. Eq. 38."""
     return (1 - albedo) * rs

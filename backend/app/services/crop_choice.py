@@ -48,7 +48,15 @@ async def _climate(db: AsyncSession, field_id: str, today: date) -> dict:
         text(
             "SELECT count(*) AS days, "
             "       coalesce(sum(precip_mm), 0) AS rain_mm, "
-            "       coalesce(avg(et0_mm), 0) AS mean_et0 "
+            "       coalesce(avg(et0_mm), 0) AS mean_et0, "
+            # Which provider this rainfall total actually came from. The
+            # sources are not interchangeable: measured at one Punjab field,
+            # NASA POWER returns 28% more seasonal rainfall than ERA5, which
+            # is the difference between "the rain covers this crop" and "it
+            # does not". A total summed across both is a number with a step
+            # change in the middle of it.
+            "       count(DISTINCT source) AS source_count, "
+            "       string_agg(DISTINCT source, \', \') AS sources "
             "FROM weather_daily "
             "WHERE field_id = :id AND time >= :since AND time <= :today"
         ),
@@ -63,6 +71,8 @@ async def _climate(db: AsyncSession, field_id: str, today: date) -> dict:
         "days": int(row["days"] or 0),
         "rain_mm": float(row["rain_mm"] or 0.0),
         "mean_et0": float(row["mean_et0"] or 0.0),
+        "source_count": int(row["source_count"] or 0),
+        "sources": row["sources"] or "",
     }
 
 
@@ -102,6 +112,21 @@ async def suggest_crops(
             f"Only {climate['days']} days of weather so far. How well a crop "
             "fits the rainfall here is the largest part of this score, so "
             "treat the order as provisional."
+        )
+
+    if climate["source_count"] > 1:
+        gaps.append(
+            "This field's weather came from more than one provider "
+            f"({climate['sources']}), because the usual one could not be "
+            "reached for part of the period. They disagree — one reads the "
+            "same season several per cent wetter than another — so treat the "
+            "rainfall figure as approximate."
+        )
+    elif climate["days"] > 0 and "open-meteo" not in climate["sources"]:
+        gaps.append(
+            f"This field's weather came from {climate['sources']} rather than "
+            "the usual source, which could not be reached. It is a coarser "
+            "grid, so the rainfall figure is less precise for your field."
         )
 
     soil = field.get("soil")

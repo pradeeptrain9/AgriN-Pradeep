@@ -8,13 +8,12 @@ opening the app must read from local tables, never wait on Copernicus.
 import json
 from datetime import date, datetime, time, timedelta, timezone
 
-import httpx
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.providers import sentinel as sentinel_provider
-from app.providers import weather as weather_provider
+from app.providers import weather_chain
 from app.providers.soil import resolve_soil
 
 WEATHER_HISTORY_DAYS = 200
@@ -30,13 +29,16 @@ async def ingest_weather(
     archive_end = today - timedelta(days=ARCHIVE_LAG_DAYS)
     archive_start = today - timedelta(days=history_days)
 
-    async with httpx.AsyncClient(
-        headers={"User-Agent": weather_provider.USER_AGENT}
-    ) as client:
-        archive = await weather_provider.fetch_archive(
-            lat, lon, archive_start, archive_end, client=client
-        )
-        forecast = await weather_provider.fetch_forecast(lat, lon, days=16, client=client)
+    # Through the chain, not straight at Open-Meteo: its rate limit is per IP
+    # and on shared hosting that IP is the platform's, so a node making two
+    # calls a day can be refused over traffic it had no part in. See
+    # providers/weather_chain.py.
+    #
+    # No shared client here either. Each source has its own identification
+    # requirements -- MET Norway refuses a request carrying someone else's
+    # User-Agent -- so each opens and closes its own.
+    archive = await weather_chain.fetch_archive(lat, lon, archive_start, archive_end)
+    forecast = await weather_chain.fetch_forecast(lat, lon, days=16)
 
     rows = {d.day: d for d in archive}
     rows.update({d.day: d for d in forecast})  # forecast wins for overlapping days
