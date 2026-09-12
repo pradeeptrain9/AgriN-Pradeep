@@ -1,8 +1,14 @@
-"""Claude vision fallback for crop disease photos.
+"""Cloud vision fallback for crop disease photos, using Gemini multimodal.
 
 Reached only when the on-device gate refuses: an uncovered crop, low confidence,
-a split decision, or a diffuse distribution. Claude generalises to leaves and
-field conditions the small CNN never saw, which is exactly what those cases need.
+a split decision, or a diffuse distribution. A large multimodal model generalises
+to leaves and field conditions the small CNN never saw, which is exactly what
+those cases need.
+
+Ordered like every other provider chain here, for the same reason: one vendor
+outage must not take crop diagnosis off a farmer's phone. The provider that
+actually answered is recorded on the diagnosis, so provenance survives the
+fallback instead of being averaged away.
 
 Two deliberate constraints:
 
@@ -24,7 +30,7 @@ from dataclasses import dataclass, field as dc_field
 
 from app.ai.disease import GateDecision, Route, build_diagnosis
 from app.ai.disease_taxonomy import DISEASES, classes_for_crop, get_disease
-from app.ai import capabilities
+from app.ai import gemini
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -213,107 +219,18 @@ class VisionIdentification:
         return self.disease_code is not None
 
 
-def identify_with_vision(
-    image_bytes: bytes,
-    *,
-    crop_code: str,
-    crop_label: str,
-    client=None,
+def _identification_from(
+    data: dict, *, notes: list[str], usage: object, model: str | None
 ) -> VisionIdentification:
-    """Ask Claude what disease the photo shows. Never returns a guess.
+    """Turn a parsed cloud answer into an identification, provider-agnostic.
 
-    An unavailable model, a refusal, an unreadable answer or "unknown" all come
-    back as an unidentified result, which the caller renders as inconclusive.
+    Shared so that both providers are held to the same refusals: an unknown
+    code, or one outside this node's disease list, is not an identification no
+    matter which model produced it. `model` carries the provenance -- which is
+    where it belongs, rather than in the route, since the route records that the
+    photograph was escalated at all.
     """
-    settings = get_settings()
-    notes: list[str] = []
-
-    def unidentified(reason: str, **billed) -> VisionIdentification:
-        notes.append(reason)
-        return VisionIdentification(
-            disease_code=None, confidence=0.0, notes=notes, **billed
-        )
-
-    if client is None:
-        if not settings.anthropic_api_key:
-            return unidentified(
-                "The on-device model was not confident enough, and no cloud "
-                "diagnosis is configured on this node. Show the plant to your "
-                "extension officer."
-            )
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-
-    try:
-        import anthropic
-    except ImportError:  # pragma: no cover
-        return unidentified("Cloud diagnosis is unavailable.")
-
-    prepared, media_type = prepare_image(image_bytes)
-    encoded = base64.standard_b64encode(prepared).decode("utf-8")
-
-    options = "\n".join(
-        f"- {d.code}: {d.label_en}" + (f" ({d.notes})" if d.notes else "")
-        for d in classes_for_crop(crop_code)
-    )
-
-    try:
-        response = client.beta.messages.create(
-            model=settings.claude_vision_model,
-            max_tokens=16000,
-            **capabilities.request_kwargs(
-                settings.claude_vision_model,
-                effort=settings.claude_vision_effort,
-                schema=_schema(crop_code),
-            ),
-            system=SYSTEM_PROMPT,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": encoded,
-                            },
-                        },
-                        {
-                            "type": "text",
-                            "text": USER_PROMPT.format(
-                                crop_label=crop_label, options=options
-                            ),
-                        },
-                    ],
-                }
-            ],
-        )
-    except (
-        anthropic.BadRequestError,
-        anthropic.AuthenticationError,
-        anthropic.PermissionDeniedError,
-        anthropic.NotFoundError,
-        anthropic.RateLimitError,
-        anthropic.APIStatusError,
-        anthropic.APIConnectionError,
-    ) as exc:
-        logger.warning("vision diagnosis unavailable (%s)", exc)
-        return unidentified("Cloud diagnosis could not be reached.")
-
-    # From here the request was billed, whatever the outcome, so every return
-    # below carries its usage. A refused or unreadable answer costs the same as
-    # a good one and has to show up in the ledger -- otherwise the cheapest way
-    # to look under budget is to fail.
-    billed = {"usage": getattr(response, "usage", None), "model": settings.claude_vision_model}
-
-    if getattr(response, "stop_reason", None) == "refusal":
-        return unidentified("Cloud diagnosis declined to answer.", **billed)
-
-    data = _extract_json(response)
-    if data is None:
-        return unidentified("Cloud diagnosis returned an unreadable answer.", **billed)
+    billed = {"usage": usage, "model": model}
 
     quality_issue = data.get("image_quality_issue")
     if quality_issue:
@@ -321,9 +238,11 @@ def identify_with_vision(
 
     code = data.get("disease_code")
     if code == "unknown" or code not in DISEASES:
-        return unidentified(
-            "The photograph could not be matched to a known disease for this crop.",
-            **billed,
+        notes.append(
+            "The photograph could not be matched to a known disease for this crop."
+        )
+        return VisionIdentification(
+            disease_code=None, confidence=0.0, notes=notes, **billed
         )
 
     symptoms = data.get("visible_symptoms")
@@ -338,6 +257,79 @@ def identify_with_vision(
         confidence=_clamped_confidence(data.get("confidence")),
         notes=notes,
         **billed,
+    )
+
+
+def identify_with_vision(
+    image_bytes: bytes,
+    *,
+    crop_code: str,
+    crop_label: str,
+    client=None,
+) -> VisionIdentification:
+    """Ask the cloud model what disease the photo shows. Never returns a guess.
+
+    An unavailable model, a refusal, an unreadable answer or "unknown" all come
+    back as an unidentified result, which the caller renders as inconclusive.
+    """
+    settings = get_settings()
+    notes: list[str] = []
+
+    def unidentified(reason: str, **billed) -> VisionIdentification:
+        notes.append(reason)
+        return VisionIdentification(
+            disease_code=None, confidence=0.0, notes=notes, **billed
+        )
+
+    if not gemini.available(settings) and client is None:
+        return unidentified(
+            "The on-device model was not confident enough, and no cloud "
+            "diagnosis is configured on this node. Show the plant to your "
+            "extension officer."
+        )
+
+    prepared, media_type = prepare_image(image_bytes)
+
+    options = "\n".join(
+        f"- {d.code}: {d.label_en}" + (f" ({d.notes})" if d.notes else "")
+        for d in classes_for_crop(crop_code)
+    )
+
+    # The escalation only happens when the on-device model already declined to
+    # answer, so this is the harder half of the photographs by construction --
+    # which is the half where abstaining correctly matters most.
+    try:
+        response = gemini.generate(
+            api_key=settings.gemini_api_key,
+            model=settings.gemini_vision_model,
+            system=SYSTEM_PROMPT,
+            messages=[
+                gemini.image_message(
+                    prepared,
+                    media_type,
+                    USER_PROMPT.format(crop_label=crop_label, options=options),
+                )
+            ],
+            schema=_schema(crop_code),
+        )
+    except (gemini.GeminiUnavailable, gemini.GeminiRejected) as exc:
+        logger.warning("cloud diagnosis unavailable (%s)", exc)
+        return unidentified("Cloud diagnosis could not be reached.")
+
+    # Billed from here whatever the outcome. A refused or unreadable answer
+    # costs the same as a good one and has to reach the ledger -- otherwise the
+    # cheapest way to look under budget is to fail.
+    billed = {"usage": response.usage, "model": response.model}
+
+    if response.stop_reason == "refusal":
+        return unidentified("Cloud diagnosis declined to answer.", **billed)
+
+    data = _extract_json(response)
+    if data is None:
+        return unidentified("Cloud diagnosis returned an unreadable answer.", **billed)
+
+    return _identification_from(
+        data, notes=notes, usage=billed["usage"], model=billed["model"]
     )
 
 
@@ -360,7 +352,7 @@ def diagnose_with_vision(
         crop_code=crop_code,
         confidence=identification.confidence,
         resolved_by=(
-            Route.CLAUDE_VISION.value if identification.identified
+            Route.CLOUD_VISION.value if identification.identified
             else Route.INCONCLUSIVE.value
         ),
         decision=decision,

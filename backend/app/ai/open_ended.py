@@ -5,7 +5,7 @@ now a photograph of one of them could not be checked at all -- the structured
 output enum in `vision._schema` was literally `["unknown"]`, so the model was
 forbidden from saying what it could plainly see.
 
-Claude's vision capability was never the constraint. The enum was, and it was
+A large model's vision capability was never the constraint. The enum was, and it was
 there for a good reason: a `disease_code` is the key into IPM actions and into
 the verified pesticide allowlist, so a code the model invented would key into
 nothing, or worse, into the wrong row.
@@ -36,7 +36,7 @@ from app.ai.vision import (
     _open_ended_schema,
     prepare_image,
 )
-from app.ai import capabilities
+from app.ai import gemini
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -68,76 +68,37 @@ def identify_open_ended(
             disease_code=None, confidence=0.0, notes=notes, **billed
         )
 
-    if client is None:
-        if not settings.anthropic_api_key:
-            return unidentified(
-                "This crop has no disease list on this node, and no cloud "
-                "diagnosis is configured. Show the plant to your extension "
-                "officer."
-            )
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-
-    try:
-        import anthropic
-    except ImportError:  # pragma: no cover - dependency is pinned
-        return unidentified("Cloud diagnosis is unavailable.")
+    if not gemini.available(settings) and client is None:
+        return unidentified(
+            "This crop has no disease list on this node, and no cloud "
+            "diagnosis is configured. Show the plant to your extension "
+            "officer."
+        )
 
     prepared, media_type = prepare_image(image_bytes)
-    encoded = base64.standard_b64encode(prepared).decode("utf-8")
 
     try:
-        response = client.beta.messages.create(
-            model=settings.claude_vision_model,
-            max_tokens=16000,
-            **capabilities.request_kwargs(
-                settings.claude_vision_model,
-                effort=settings.claude_vision_effort,
-                schema=_open_ended_schema(),
-            ),
+        response = gemini.generate(
+            api_key=settings.gemini_api_key,
+            model=settings.gemini_vision_model,
             system=OPEN_ENDED_SYSTEM_PROMPT,
             messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": encoded,
-                            },
-                        },
-                        {
-                            "type": "text",
-                            "text": OPEN_ENDED_USER_PROMPT.format(
-                                crop_label=crop_label
-                            ),
-                        },
-                    ],
-                }
+                gemini.image_message(
+                    prepared,
+                    media_type,
+                    OPEN_ENDED_USER_PROMPT.format(crop_label=crop_label),
+                )
             ],
+            schema=_open_ended_schema(),
         )
-    except (
-        anthropic.BadRequestError,
-        anthropic.AuthenticationError,
-        anthropic.PermissionDeniedError,
-        anthropic.NotFoundError,
-        anthropic.RateLimitError,
-        anthropic.APIStatusError,
-        anthropic.APIConnectionError,
-    ) as exc:
+    except (gemini.GeminiUnavailable, gemini.GeminiRejected) as exc:
         logger.warning("open-ended diagnosis unavailable (%s)", exc)
         return unidentified("Cloud diagnosis could not be reached.")
 
     # Billed from here whatever the outcome, so every return below carries it.
-    billed = {
-        "usage": getattr(response, "usage", None),
-        "model": settings.claude_vision_model,
-    }
+    billed = {"usage": response.usage, "model": response.model}
 
-    if getattr(response, "stop_reason", None) == "refusal":
+    if response.stop_reason == "refusal":
         return unidentified("Cloud diagnosis declined to answer.", **billed)
 
     from app.ai.vision import _extract_json, _clamped_confidence

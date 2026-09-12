@@ -1,6 +1,6 @@
 """Narration tests.
 
-No network. The Claude path is exercised with a stub client so the guard,
+No network. The model path is exercised with a stubbed gemini.generate so the guard,
 the corrective retry, and every fallback route are covered deterministically.
 """
 
@@ -44,39 +44,43 @@ ADVISORY = {
 
 
 class StubResponse:
-    def __init__(self, data, stop_reason="end_turn", model="claude-opus-5"):
+    """Shaped like what gemini.generate returns, which is all narrate() sees."""
+
+    def __init__(self, data, stop_reason=None, model="gemini-2.5-flash"):
         text = data if isinstance(data, str) else json.dumps(data)
         self.content = [SimpleNamespace(type="text", text=text)]
         self.stop_reason = stop_reason
         self.model = model
+        self.usage = SimpleNamespace(
+            input_tokens=10, output_tokens=20,
+            cache_read_input_tokens=0, cache_creation_input_tokens=0,
+        )
 
 
-class StubClient:
-    """Returns queued responses and records the requests it received."""
+class FakeGemini:
+    """Records each request and returns queued responses, or raises."""
 
-    def __init__(self, responses):
+    def __init__(self, responses=(), raises=None):
         self._responses = list(responses)
+        self.raises = raises
         self.calls = []
-        outer = self
 
-        class Messages:
-            def create(self, **kwargs):
-                outer.calls.append(kwargs)
-                return outer._responses.pop(0)
-
-        self.beta = SimpleNamespace(messages=Messages())
+    def __call__(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.raises is not None:
+            raise self.raises
+        return self._responses.pop(0)
 
 
-class RaisingClient:
-    def __init__(self, exc):
-        outer = self
+def patch_gemini(monkeypatch, fake):
+    """Give the node a key and make gemini.generate return what we queued."""
+    from app.ai import gemini
+    from app.config import get_settings
 
-        class Messages:
-            def create(self, **kwargs):
-                raise outer.exc
-
-        self.exc = exc
-        self.beta = SimpleNamespace(messages=Messages())
+    get_settings.cache_clear()
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(gemini, "generate", fake)
+    return fake
 
 
 GOOD = {
@@ -154,17 +158,19 @@ class TestNoApiKey:
         from app.config import get_settings
 
         get_settings.cache_clear()
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+        monkeypatch.setenv("GEMINI_API_KEY", "")
         result = narrate(ADVISORY, lang="en")
         get_settings.cache_clear()
         assert result.source == "template"
         assert any("no language model key" in n for n in result.notes)
 
     def test_non_english_request_is_marked_untranslated(self, monkeypatch):
+        # The template is English. Claiming otherwise would have the app render
+        # English text under a Hindi heading with no indication anything failed.
         from app.config import get_settings
 
         get_settings.cache_clear()
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+        monkeypatch.setenv("GEMINI_API_KEY", "")
         result = narrate(ADVISORY, lang="hi")
         get_settings.cache_clear()
         assert result.source == "template"
@@ -172,78 +178,91 @@ class TestNoApiKey:
         assert result.lang == "en"
 
 
-class TestClaudePath:
-    def test_clean_narration_is_returned(self):
-        client = StubClient([StubResponse(GOOD)])
-        result = narrate(ADVISORY, lang="en", client=client)
-        assert result.source == "claude"
+class TestGeminiPath:
+    def test_clean_narration_is_returned(self, monkeypatch):
+        patch_gemini(monkeypatch, FakeGemini([StubResponse(GOOD)]))
+        result = narrate(ADVISORY, lang="en")
+        assert result.source == "gemini"
         assert result.guard_violations == []
         assert result.retried is False
         assert "74 days" in result.summary
 
-    def test_request_uses_the_configured_model_and_schema(self):
-        client = StubClient([StubResponse(GOOD)])
-        narrate(ADVISORY, lang="en", client=client)
-        call = client.calls[0]
-        # Read it from settings rather than hardcoding: the point of this test
-        # is that the request honours configuration, and pinning a literal here
-        # just makes it fail whenever the default is deliberately changed.
+    def test_request_uses_the_configured_model_and_schema(self, monkeypatch):
+        fake = patch_gemini(monkeypatch, FakeGemini([StubResponse(GOOD)]))
+        narrate(ADVISORY, lang="en")
         from app.config import get_settings
 
-        assert call["model"] == get_settings().claude_narrate_model
-        assert call["output_config"]["format"]["type"] == "json_schema"
-        assert call["thinking"] == {"type": "adaptive"}
+        call = fake.calls[0]
+        assert call["model"] == get_settings().gemini_narrate_model
+        assert call["schema"]["properties"]["summary"]["type"] == "string"
 
-    def test_language_is_passed_into_the_system_prompt(self):
-        client = StubClient([StubResponse(GOOD)])
-        narrate(ADVISORY, lang="pa", client=client)
-        assert "Punjabi" in client.calls[0]["system"]
+    def test_language_is_passed_into_the_system_prompt(self, monkeypatch):
+        fake = patch_gemini(monkeypatch, FakeGemini([StubResponse(GOOD)]))
+        narrate(ADVISORY, lang="pa")
+        assert "Punjabi" in fake.calls[0]["system"]
 
-    def test_invented_numbers_trigger_a_corrective_retry(self):
-        client = StubClient([StubResponse(INVENTED), StubResponse(GOOD)])
-        result = narrate(ADVISORY, lang="en", client=client)
-        assert len(client.calls) == 2
-        assert result.source == "claude"
+    def test_invented_numbers_trigger_a_corrective_retry(self, monkeypatch):
+        fake = patch_gemini(
+            monkeypatch, FakeGemini([StubResponse(INVENTED), StubResponse(GOOD)])
+        )
+        result = narrate(ADVISORY, lang="en")
+        assert len(fake.calls) == 2
+        assert result.source == "gemini"
         assert result.retried is True
         # The retry prompt must name the offending figures.
-        correction = client.calls[1]["messages"][-1]["content"]
+        correction = fake.calls[1]["messages"][-1]["content"]
         assert "250" in correction
 
-    def test_persistent_invention_falls_back_to_template(self):
-        client = StubClient([StubResponse(INVENTED), StubResponse(INVENTED)])
-        result = narrate(ADVISORY, lang="en", client=client)
+    def test_the_corrective_turn_uses_the_assistant_role(self, monkeypatch):
+        # gemini.py maps assistant -> model. If the rejected draft were replayed
+        # under the wrong role the model would be told it wrote nothing, and the
+        # correction would argue with itself.
+        fake = patch_gemini(
+            monkeypatch, FakeGemini([StubResponse(INVENTED), StubResponse(GOOD)])
+        )
+        narrate(ADVISORY, lang="en")
+        roles = [m["role"] for m in fake.calls[1]["messages"]]
+        assert roles == ["user", "assistant", "user"]
+
+    def test_persistent_invention_falls_back_to_template(self, monkeypatch):
+        patch_gemini(
+            monkeypatch, FakeGemini([StubResponse(INVENTED), StubResponse(INVENTED)])
+        )
+        result = narrate(ADVISORY, lang="en")
         assert result.source == "template"
         assert result.guard_violations
         assert any("not in the calculated advice" in n for n in result.notes)
 
-    def test_refusal_falls_back_to_template(self):
-        client = StubClient([StubResponse(GOOD, stop_reason="refusal")])
-        result = narrate(ADVISORY, lang="en", client=client)
-        assert result.source == "template"
+    def test_refusal_falls_back_to_template(self, monkeypatch):
+        patch_gemini(
+            monkeypatch, FakeGemini([StubResponse(GOOD, stop_reason="refusal")])
+        )
+        assert narrate(ADVISORY, lang="en").source == "template"
 
-    def test_malformed_json_falls_back_to_template(self):
-        client = StubClient([StubResponse("not json at all")])
-        result = narrate(ADVISORY, lang="en", client=client)
-        assert result.source == "template"
+    def test_malformed_json_falls_back_to_template(self, monkeypatch):
+        patch_gemini(monkeypatch, FakeGemini([StubResponse("not json at all")]))
+        assert narrate(ADVISORY, lang="en").source == "template"
 
-    @pytest.mark.parametrize("exc_name", ["RateLimitError", "APIConnectionError", "BadRequestError"])
-    def test_api_errors_fall_back_to_template(self, exc_name):
-        import anthropic
-        import httpx2
+    @pytest.mark.parametrize("exc", [
+        "GeminiUnavailable",   # transport, auth, quota
+        "GeminiRejected",      # blocked input, empty completion
+    ])
+    def test_api_errors_fall_back_to_template(self, monkeypatch, exc):
+        from app.ai import gemini
 
-        request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
-        exc_cls = getattr(anthropic, exc_name)
-        if exc_name == "APIConnectionError":
-            exc = exc_cls(message="boom", request=request)
-        else:
-            response = httpx2.Response(
-                429 if exc_name == "RateLimitError" else 400, request=request
-            )
-            exc = exc_cls(message="boom", response=response, body=None)
-
-        result = narrate(ADVISORY, lang="en", client=RaisingClient(exc))
+        patch_gemini(monkeypatch, FakeGemini(raises=getattr(gemini, exc)("boom")))
+        result = narrate(ADVISORY, lang="en")
         assert result.source == "template"
         assert any("built-in template" in n for n in result.notes)
+
+    def test_every_billed_call_is_reported(self, monkeypatch):
+        # Including the corrective round. A retry that is not recorded is spend
+        # that does not exist as far as the monthly cap is concerned.
+        patch_gemini(
+            monkeypatch, FakeGemini([StubResponse(INVENTED), StubResponse(GOOD)])
+        )
+        result = narrate(ADVISORY, lang="en")
+        assert len(result.usages) == 2
 
 
 def test_result_serialises():

@@ -121,7 +121,7 @@ export interface Narration {
   actions: Array<{ title: string; detail: string; urgency: string }>;
   explanation: string;
   lang: string;
-  source: 'claude' | 'template';
+  source: 'gemini' | 'template';
   translated: boolean;
   notes: string[];
 }
@@ -130,7 +130,7 @@ export interface DiseasePrediction { class_code: string; probability: number }
 
 export interface Diagnosis {
   id: string;
-  resolved_by: 'on_device' | 'claude_vision' | 'inconclusive';
+  resolved_by: 'on_device' | 'cloud_vision' | 'inconclusive';
   disease_code: string | null;
   label: string | null;
   crop_code: string;

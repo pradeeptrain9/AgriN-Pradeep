@@ -1,0 +1,102 @@
+# Cloud Run deployment for an AgriN node.
+#
+# Additive. The Render blueprint in render.yaml still works and the deployed
+# node still runs there; this exists so a ministry or a state department that
+# already lives inside Google Cloud can stand up its own node without arguing
+# with a procurement team about a vendor nobody has heard of. That argument is
+# usually the real blocker, not the engineering.
+#
+# The container is unchanged -- the same backend/Dockerfile Render builds. A node
+# that needs a different image to run in a different place is a node nobody will
+# federate with.
+#
+#   gcloud builds submit --tag gcr.io/PROJECT/agrin-node backend/
+#   gcloud run services replace service.yaml --region asia-south1
+#
+# Secrets come from Secret Manager, never from this file. Committing a key here
+# would put it in the public repository this project's licence invites people to
+# clone.
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: agrin-node
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        # A node holds a Postgres pool. Without a floor it cold-starts and
+        # rebuilds that pool on the first request after a quiet hour, which is
+        # the same 30-second wait the Render free tier already imposes and which
+        # farmers should not have to live with twice.
+        autoscaling.knative.dev/minScale: "1"
+        # Ingest fans out to Copernicus, Open-Meteo and Bhuvan concurrently and
+        # spends most of its time waiting. Capping concurrency low would buy
+        # nothing and cost instances.
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/cpu-throttling: "false"
+    spec:
+      containerConcurrency: 40
+      timeoutSeconds: 300
+      containers:
+        - image: gcr.io/PROJECT_ID/agrin-node:latest
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          env:
+            - name: AGRIN_ENV
+              value: production
+            - name: NODE_ID
+              value: node-in
+            - name: NODE_COUNTRY
+              value: IN
+            - name: PORT
+              value: "8000"
+
+            # --- Secrets. Create each with:
+            #     gcloud secrets create NAME --replication-policy=automatic
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: agrin-database-url
+                  key: latest
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agrin-secret-key
+                  key: latest
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agrin-gemini-key
+                  key: latest
+            - name: CDSE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: agrin-cdse-id
+                  key: latest
+            - name: CDSE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: agrin-cdse-secret
+                  key: latest
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            # /health, not /ready. /ready reports a missing SMS provider as a
+            # blocker on purpose, and Cloud Run would read that as a crash loop
+            # and restart a node that is running perfectly well.
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 30

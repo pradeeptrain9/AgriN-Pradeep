@@ -1,4 +1,4 @@
-"""Crop disease diagnosis: on-device gate, escalation, and Claude vision fallback.
+"""Crop disease diagnosis: on-device gate, escalation, and cloud vision fallback.
 
 The on-device classifier is a small int8 CNN bundled in the app. It is fast and
 works with no signal, but it is only as good as its training data, and a softmax
@@ -12,7 +12,7 @@ So a prediction is accepted only if it clears three independent checks:
              margin over the runner-up and by the entropy of the whole
              distribution
 
-Failing any of them routes the photo to Claude vision, which generalises far
+Failing any of them routes the photo to cloud vision, which generalises far
 better to crops and conditions the CNN never saw. Coverage is checked first and
 is not overridable: no confidence score from a model that has never seen cotton
 tells you anything about a cotton leaf.
@@ -46,12 +46,12 @@ LOW_DATA_MIN_MARGIN = 0.30
 
 class Route(str, Enum):
     ON_DEVICE = "on_device"
-    CLAUDE_VISION = "claude_vision"
+    CLOUD_VISION = "cloud_vision"
     INCONCLUSIVE = "inconclusive"
     # A name, on a crop with no verified disease list. Distinct from
     # INCONCLUSIVE because something WAS identified and a call WAS billed --
     # collapsing the two would make the audit log read as though nothing
-    # happened -- and distinct from CLAUDE_VISION because nothing downstream
+    # happened -- and distinct from CLOUD_VISION because nothing downstream
     # checked the answer and no treatment is attached to it.
     PROVISIONAL = "provisional"
 
@@ -149,7 +149,7 @@ def gate(predictions: list[Prediction], *, crop_code: str) -> GateDecision:
             "carries no information for this crop."
         )
         return GateDecision(
-            route=Route.CLAUDE_VISION,
+            route=Route.CLOUD_VISION,
             accepted=False,
             top_class=None,
             top_probability=top_prob,
@@ -172,7 +172,7 @@ def gate(predictions: list[Prediction], *, crop_code: str) -> GateDecision:
             f"not a disease of {crop_code}, so it cannot be about this plant."
         )
         return GateDecision(
-            route=Route.CLAUDE_VISION, accepted=False, top_class=None,
+            route=Route.CLOUD_VISION, accepted=False, top_class=None,
             top_probability=top_prob, margin=margin, normalised_entropy=entropy,
             thresholds=thresholds, reasons=reasons,
         )
@@ -180,7 +180,7 @@ def gate(predictions: list[Prediction], *, crop_code: str) -> GateDecision:
     if not ranked:
         reasons.append("No on-device prediction was supplied.")
         return GateDecision(
-            route=Route.CLAUDE_VISION, accepted=False, top_class=None,
+            route=Route.CLOUD_VISION, accepted=False, top_class=None,
             top_probability=0.0, margin=0.0, normalised_entropy=0.0,
             thresholds=thresholds, reasons=reasons,
         )
@@ -205,7 +205,7 @@ def gate(predictions: list[Prediction], *, crop_code: str) -> GateDecision:
     )
     if failed:
         return GateDecision(
-            route=Route.CLAUDE_VISION, accepted=False, top_class=top.class_code,
+            route=Route.CLOUD_VISION, accepted=False, top_class=top.class_code,
             top_probability=top_prob, margin=margin, normalised_entropy=entropy,
             thresholds=thresholds, reasons=reasons,
         )
@@ -221,7 +221,7 @@ def gate(predictions: list[Prediction], *, crop_code: str) -> GateDecision:
 @dataclass
 class Diagnosis:
     engine_version: str
-    resolved_by: str                  # on_device | claude_vision | inconclusive
+    resolved_by: str                  # on_device | cloud_vision | inconclusive
     disease_code: str | None
     label: str | None
     crop_code: str
@@ -365,7 +365,7 @@ def diagnose_on_device(
 ) -> tuple[GateDecision, Diagnosis | None]:
     """Run the gate. Returns (decision, diagnosis-or-None).
 
-    A None diagnosis means the caller must escalate to Claude vision.
+    A None diagnosis means the caller must escalate to cloud vision.
     """
     decision = gate(predictions, crop_code=crop_code)
     if not decision.accepted or decision.top_class is None:

@@ -1,4 +1,4 @@
-"""What Claude costs this node, and the caps that stop it running away.
+"""What the cloud model costs this node, and the caps that stop it running away.
 
 Two separate jobs:
 
@@ -42,16 +42,33 @@ class Rate:
     output_usd: float
 
 
-# Anthropic first-party rates. Deliberately a table and not a lookup at call
+# Google first-party rates. Deliberately a table and not a lookup at call
 # time: a node in the field cannot reach a pricing endpoint, and a wrong price
 # silently mis-reports the budget rather than failing loudly.
 #
-# Check these against https://www.anthropic.com/pricing when upgrading models.
+# Check these against https://ai.google.dev/gemini-api/docs/pricing when
+# upgrading models.
 RATES: dict[str, Rate] = {
-    "claude-opus-5": Rate(input_usd=5.00, output_usd=25.00),
-    "claude-sonnet-5": Rate(input_usd=2.00, output_usd=10.00),
-    "claude-haiku-4-5": Rate(input_usd=1.00, output_usd=5.00),
+    # Rounded UP to the next published tier where a model prices by context
+    # length. `price()` returns 0.0 for a model it does not know, so an
+    # unlisted model would spend without ever reaching the monthly cap --
+    # over-pricing makes the cap bind early, which is the safe direction, and
+    # under-pricing makes it not bind at all.
+    "gemini-2.5-flash": Rate(input_usd=0.30, output_usd=2.50),
+    "gemini-2.5-pro": Rate(input_usd=2.50, output_usd=15.00),
+    "gemini-2.0-flash": Rate(input_usd=0.10, output_usd=0.40),
 }
+
+# Gemini reports the model it actually served as e.g. "gemini-2.5-flash-002".
+# Pricing is per family, so an exact-match table would silently price a served
+# response at zero.
+def rate_for(model: str) -> Rate | None:
+    if (exact := RATES.get(model)) is not None:
+        return exact
+    for name, rate in RATES.items():
+        if model.startswith(name):
+            return rate
+    return None
 
 # Cache reads bill at 0.1x input, 5-minute writes at 1.25x.
 CACHE_READ_MULTIPLIER = 0.1
@@ -64,7 +81,7 @@ def price(model: str, usage: object) -> float:
     An unknown model prices at zero rather than guessing. A wrong number in the
     ledger is worse than a visible gap: it would be believed.
     """
-    rate = RATES.get(model)
+    rate = rate_for(model)
     if rate is None:
         return 0.0
 
@@ -112,7 +129,7 @@ async def check_budget(db: AsyncSession, user_id: str | None = None) -> None:
     spent = await month_usd_spent(db)
     if spent >= settings.llm_monthly_usd_cap:
         raise BudgetReached(
-            f"Monthly Claude budget reached (${spent:.2f} of "
+            f"Monthly cloud-model budget reached (${spent:.2f} of "
             f"${settings.llm_monthly_usd_cap:.2f}). Cloud diagnosis is paused "
             "until the 1st. On-device diagnosis is unaffected."
         )

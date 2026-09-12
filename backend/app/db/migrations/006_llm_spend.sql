@@ -1,4 +1,4 @@
--- Every Claude call this node makes, priced at the time it was made.
+-- Every cloud-model call this node makes, priced at the time it was made.
 --
 -- The Copernicus budget already has pu_ledger; this is the same idea for the
 -- one dependency that bills in real money. Without it the only way to find out

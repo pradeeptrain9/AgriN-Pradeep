@@ -6,13 +6,18 @@ rather than by trusting the prompt.
 
 Three layers, in order of preference:
 
-  1. Claude, schema-constrained, output checked by the guard
-  2. Claude again, once, with the violations fed back
+  1. Gemini, schema-constrained, output checked by the guard
+  2. Gemini again, once, with the violations fed back
   3. the deterministic English template, which needs no API key and no network
 
 Layer 3 is not a degraded mode to apologise for. It is what runs offline, what
 runs when the key is missing, and what runs when the model writes a number it
 should not have. The app is fully usable on it.
+
+There is no second model. That is a deliberate narrowing: the guard, the
+corrective round and the template do not care which model was asked, so a
+fallback provider bought resilience rather than safety, and resilience is
+already covered by layer 3.
 """
 
 import json
@@ -21,7 +26,7 @@ from dataclasses import dataclass, field as dc_field
 from typing import Any
 
 from app.ai.guard import check_narration
-from app.ai import capabilities
+from app.ai import gemini
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -109,7 +114,7 @@ class NarrationResult:
     actions: list[dict]
     explanation: str
     lang: str
-    source: str                       # claude | template
+    source: str                       # gemini | template
     model: str | None = None
     guard_violations: list[str] = dc_field(default_factory=list)
     retried: bool = False
@@ -335,83 +340,55 @@ def _extract_json(response: Any) -> dict | None:
     return None
 
 
-def _call_claude(client, model: str, language: str, messages: list[dict]):
-    return client.beta.messages.create(
+def _call_gemini(api_key: str, model: str, language: str, messages: list[dict]):
+    return gemini.generate(
+        api_key=api_key,
         model=model,
-        max_tokens=16000,
-        **capabilities.request_kwargs(
-            model, effort="low", schema=NARRATION_SCHEMA
-        ),
         system=SYSTEM_PROMPT.format(language=language),
         messages=messages,
+        schema=NARRATION_SCHEMA,
+        max_output_tokens=8192,
     )
 
 
-def narrate(payload: dict, *, lang: str = "en", client=None) -> NarrationResult:
-    """Narrate an advisory payload, falling back to the template on any problem."""
-    settings = get_settings()
-    language = LANGUAGES.get(lang, LANGUAGES["en"])
-    template = build_template_narration(payload)
+def _guarded(
+    call,
+    *,
+    source: str,
+    model: str,
+    payload: dict,
+    lang: str,
+    messages: list[dict],
+    billed: list,
+    errors: tuple,
+) -> NarrationResult | None:
+    """Run one provider through the guard. None means "try the next thing".
 
-    if client is None:
-        if not settings.anthropic_api_key:
-            template.notes.append(
-                "Narration used the built-in template because no language model "
-                "key is configured."
-                + ("" if lang == "en" else f" Text is in English, not {language}.")
-            )
-            template.translated = lang == "en"
-            template.lang = "en"
-            return template
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-
-    model = settings.claude_narrate_model
-    compact = json.dumps(payload, sort_keys=True, default=str)
-    messages: list[dict] = [
-        {"role": "user", "content": USER_TEMPLATE.format(payload=compact, language=language)}
-    ]
-
-    try:
-        import anthropic
-    except ImportError:  # pragma: no cover - dependency is pinned
-        return template
-
-    billed: list[object] = []
-    template.usages = billed
-
+    This function is the reason a second provider was cheap to add, and the
+    reason adding it could not weaken anything: the rule that every figure must
+    trace to the engine is enforced here, once, for whoever is answering. The
+    corrective round is here too, so a model that invents a number gets exactly
+    one chance to withdraw it regardless of who made it.
+    """
     for attempt in (1, 2):
         try:
-            response = _call_claude(client, model, language, messages)
-        except (
-            anthropic.BadRequestError,
-            anthropic.AuthenticationError,
-            anthropic.PermissionDeniedError,
-            anthropic.NotFoundError,
-        ) as exc:
-            logger.warning("narration request rejected (%s); using template", exc)
-            template.notes.append("Narration fell back to the built-in template.")
-            return template
-        except (anthropic.RateLimitError, anthropic.APIStatusError, anthropic.APIConnectionError) as exc:
-            logger.warning("narration unavailable (%s); using template", exc)
-            template.notes.append("Narration fell back to the built-in template.")
-            return template
+            response = call(messages)
+        except errors as exc:
+            logger.warning("%s narration unavailable (%s)", source, exc)
+            return None
 
         usage = getattr(response, "usage", None)
         if usage is not None:
             billed.append(usage)
 
         if getattr(response, "stop_reason", None) == "refusal":
-            logger.warning("narration refused by the model; using template")
-            template.notes.append("Narration fell back to the built-in template.")
-            return template
+            logger.warning("%s narration refused by the model", source)
+            return None
 
         data = _extract_json(response)
         if data is None:
-            logger.warning("narration was not valid JSON; using template")
-            template.notes.append("Narration fell back to the built-in template.")
-            return template
+            logger.warning("%s narration was not valid JSON", source)
+            return None
 
         violations = check_narration(data, payload)
         if not violations:
@@ -420,17 +397,16 @@ def narrate(payload: dict, *, lang: str = "en", client=None) -> NarrationResult:
                 actions=data.get("actions", []),
                 explanation=data.get("explanation", ""),
                 lang=lang,
-                source="claude",
+                source=source,
                 model=getattr(response, "model", model),
                 retried=attempt == 2,
                 translated=True,
-                notes=list(template.notes),
                 usages=billed,
             )
 
         if attempt == 1:
             # One corrective round: name the offending figures and try again.
-            logger.info("narration guard rejected output: %s", violations)
+            logger.info("%s narration guard rejected output: %s", source, violations)
             messages = messages + [
                 {"role": "assistant", "content": json.dumps(data)},
                 {
@@ -446,12 +422,82 @@ def narrate(payload: dict, *, lang: str = "en", client=None) -> NarrationResult:
             ]
             continue
 
-        logger.warning("narration still unsupported after retry; using template")
-        template.guard_violations = violations
+        logger.warning("%s narration still unsupported after retry", source)
+        _LAST_VIOLATIONS.clear()
+        _LAST_VIOLATIONS.extend(violations)
+        return None
+
+    return None
+
+
+# Carries the guard's complaint out of _guarded so the template can report it.
+# A list rather than a return value because a guard failure and a transport
+# failure both mean "try the next provider", and collapsing them into one
+# signal keeps the fallback logic readable.
+_LAST_VIOLATIONS: list[str] = []
+
+
+def narrate(payload: dict, *, lang: str = "en", client=None) -> NarrationResult:
+    """Narrate an advisory payload, falling back to the template on any problem.
+
+    Gemini, then the deterministic template. Every attempt passes through the
+    same guard, and `source` records which one actually produced the words the
+    farmer read.
+    """
+    settings = get_settings()
+    language = LANGUAGES.get(lang, LANGUAGES["en"])
+    template = build_template_narration(payload)
+    _LAST_VIOLATIONS.clear()
+
+    compact = json.dumps(payload, sort_keys=True, default=str)
+    messages: list[dict] = [
+        {"role": "user", "content": USER_TEMPLATE.format(payload=compact, language=language)}
+    ]
+
+    billed: list[object] = []
+    template.usages = billed
+
+    # --- Gemini first.
+    if client is None and gemini.available(settings):
+        model = settings.gemini_narrate_model
+        result = _guarded(
+            lambda msgs: _call_gemini(settings.gemini_api_key, model, language, msgs),
+            source="gemini",
+            model=model,
+            payload=payload,
+            lang=lang,
+            messages=messages,
+            billed=billed,
+            errors=(gemini.GeminiUnavailable, gemini.GeminiRejected),
+        )
+        if result is not None:
+            result.notes = list(template.notes)
+            return result
+
+    # No second provider. Gemini or the deterministic template -- and the
+    # template is not a failure mode, it is the same advice in the same plain
+    # language, because the advice was never the model's to make.
+    if _LAST_VIOLATIONS:
+        template.guard_violations = list(_LAST_VIOLATIONS)
         template.notes.append(
             "The generated wording used figures that are not in the calculated "
             "advice, so the built-in template was used instead."
         )
-        return template
-
+    elif client is None and not gemini.available(settings):
+        # No key at all is a different situation from a model that failed, and
+        # the difference matters to whoever is reading it: one is a
+        # configuration the operator can fix, the other is weather. It also has
+        # to say the text is English, because the template only exists in
+        # English -- rendering it under a Hindi heading with no warning would
+        # leave a farmer assuming the app simply does not work in their
+        # language.
+        template.notes.append(
+            "Narration used the built-in template because no language model "
+            "key is configured."
+            + ("" if lang == "en" else f" Text is in English, not {language}.")
+        )
+        template.translated = lang == "en"
+        template.lang = "en"
+    else:
+        template.notes.append("Narration fell back to the built-in template.")
     return template

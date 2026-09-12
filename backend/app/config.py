@@ -20,23 +20,63 @@ class Settings(BaseSettings):
     cdse_client_secret: str = ""
     cdse_monthly_pu_cap: float = 9000.0
 
-    anthropic_api_key: str = ""
-    # Narration only rephrases the computed advisory, and ai/guard.py rejects
-    # any figure the payload does not contain -- so the safety property here is
-    # enforced by code, not by model strength. Measured guard-clean on a real
-    # advisory at a third of Opus 5's cost.
-    claude_narrate_model: str = "claude-sonnet-5"
-    claude_vision_model: str = "claude-opus-5"
 
-    # Hard ceilings on what this node can spend on Claude. The monthly cap is
-    # what makes a stated running cost true rather than hopeful; the per-user
-    # daily cap stops one handset draining the month. Both degrade to
+    # Google Gemini is the only cloud model this node calls, for both narration
+    # and diagnosis. There is no second provider: the guard, the corrective round
+    # and the deterministic template do not care which model was asked, so a
+    # fallback model bought resilience rather than safety -- and resilience is
+    # already covered by the template. See app/ai/gemini.py.
+    gemini_api_key: str = ""
+    gemini_narrate_model: str = "gemini-2.5-flash"
+    gemini_vision_model: str = "gemini-2.5-pro"
+
+    # Google Maps Platform satellite basemap. Unset means OpenStreetMap street
+    # tiles, which is the keyless path and still works. See
+    # app/providers/basemap.py for why the key lives here and not in the APK.
+    google_maps_api_key: str = ""
+    node_language: str = "en"
+
+    # Google Cloud Text-to-Speech, so an advisory can be listened to rather than
+    # read. Unset means the app shows text only.
+    google_tts_api_key: str = ""
+
+    # Cloud Translation, used ONLY on the deterministic template -- the fallback
+    # wording is English-only, so without this the farmer most likely to be
+    # handed English is the one whose node ran out of credit. Never applied to a
+    # narration a model already wrote in the target language.
+    google_translate_api_key: str = ""
+
+    # Every Google service below needs a service-account file rather than an API
+    # key, so each is off unless a path is given and a node that never sets one
+    # behaves exactly as it did before.
+    google_credentials_path: str = ""
+    google_project_id: str = ""
+
+    # Vertex AI serves the SAME rice classifier for phones whose TFLite delegate
+    # will not load. It does not replace on-device inference -- see
+    # app/providers/vertex.py.
+    vertex_location: str = "asia-south1"
+    vertex_endpoint_id: str = ""
+
+    # Earth Engine as a second NDVI supply behind Copernicus, for when the
+    # monthly processing-unit cap is reached. NOT verified against live GEE.
+    earth_engine_project: str = ""
+
+    # BigQuery export of signed federation aggregates. District-level rows only,
+    # and the k-anonymity refusal runs again before anything leaves.
+    bigquery_dataset: str = ""
+    bigquery_table: str = "federation_aggregates"
+
+    # Hard ceilings on what this node can spend on the cloud model. The monthly
+    # cap is what makes a stated running cost true rather than hopeful; the
+    # per-user daily cap stops one handset draining the month. Both degrade to
     # on-device-only, never to an error the farmer has to understand.
-    # Vision runs at high effort: a misdiagnosis costs a farmer a spray or a
-    # season, and thinking tokens are a small share of a photo's cost. Lower it
-    # only against measured accuracy on held-out photos.
-    claude_vision_effort: str = "high"
-
+    #
+    # Narration only rephrases the computed advisory, and ai/guard.py rejects any
+    # figure the payload does not contain -- so the safety property here is
+    # enforced by code, not by model strength. That is what makes Flash the right
+    # default for narration and Pro the right one for a leaf photograph, where a
+    # misdiagnosis costs a farmer a spray or a season.
     llm_monthly_usd_cap: float = 25.0
     llm_daily_calls_per_user: int = 20
 

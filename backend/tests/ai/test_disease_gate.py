@@ -62,7 +62,7 @@ class TestCoverageGate:
         decision = gate(
             preds(("rice__blast", 0.99), ("rice__normal", 0.01)), crop_code="cotton"
         )
-        assert decision.route is Route.CLAUDE_VISION
+        assert decision.route is Route.CLOUD_VISION
         assert decision.accepted is False
         assert decision.top_class is None
         assert any("not trained on cotton" in r for r in decision.reasons)
@@ -73,7 +73,7 @@ class TestCoverageGate:
     )
     def test_every_uncovered_registry_crop_is_refused(self, crop):
         decision = gate(preds(("rice__blast", 0.99)), crop_code=crop)
-        assert decision.route is Route.CLAUDE_VISION
+        assert decision.route is Route.CLOUD_VISION
 
     def test_only_crops_with_trained_weights_are_supported(self):
         # This asserted maize and potato were supported while the only weights
@@ -111,7 +111,7 @@ class TestCrossCropPredictions:
 
     def test_a_confident_foreign_class_is_refused(self):
         decision = gate(preds(("potato__late_blight", 0.99)), crop_code="rice")
-        assert decision.route is Route.CLAUDE_VISION
+        assert decision.route is Route.CLOUD_VISION
         assert not decision.accepted
         assert decision.top_class is None
 
@@ -129,7 +129,7 @@ class TestCrossCropPredictions:
                   ("potato__late_blight", 0.05)),
             crop_code="rice",
         )
-        assert decision.route is Route.CLAUDE_VISION
+        assert decision.route is Route.CLOUD_VISION
         assert not decision.accepted
 
     def test_wheat_aliasing_is_not_treated_as_foreign(self):
@@ -153,23 +153,23 @@ class TestConfidenceGate:
             preds(("rice__blast", 0.55), ("rice__normal", 0.25), ("rice__hispa", 0.20)),
             crop_code="rice",
         )
-        assert decision.route is Route.CLAUDE_VISION
+        assert decision.route is Route.CLOUD_VISION
         assert any("below the" in r for r in decision.reasons)
 
     def test_split_decision_escalates_despite_being_top_class(self):
         """0.44 vs 0.42 is a coin flip, not a diagnosis."""
         decision = gate(SPLIT, crop_code="rice")
-        assert decision.route is Route.CLAUDE_VISION
+        assert decision.route is Route.CLOUD_VISION
         assert any("split between classes" in r for r in decision.reasons)
 
     def test_diffuse_distribution_escalates_on_entropy(self):
         decision = gate(DIFFUSE, crop_code="rice")
-        assert decision.route is Route.CLAUDE_VISION
+        assert decision.route is Route.CLOUD_VISION
         assert any("spread across many classes" in r for r in decision.reasons)
 
     def test_empty_prediction_escalates(self):
         decision = gate([], crop_code="rice")
-        assert decision.route is Route.CLAUDE_VISION
+        assert decision.route is Route.CLOUD_VISION
 
     def test_thresholds_are_reported_for_audit(self):
         decision = gate(CONFIDENT, crop_code="rice")
@@ -193,7 +193,7 @@ class TestThinDataCrops:
         assert rice.route is Route.ON_DEVICE
         # Wheat refuses -- today because it has no weights at all, and once it
         # has them because 0.78 is under its stricter 0.85 bar.
-        assert wheat.route is Route.CLAUDE_VISION
+        assert wheat.route is Route.CLOUD_VISION
         assert wheat.thresholds["min_confidence"] == LOW_DATA_MIN_CONFIDENCE
         assert rice.thresholds["min_confidence"] == MIN_CONFIDENCE
 
@@ -206,7 +206,7 @@ class TestThinDataCrops:
             ("wheat__healthy", 0.02),
         )
         decision = gate(strong, crop_code="wheat_spring")
-        assert decision.route is Route.CLAUDE_VISION
+        assert decision.route is Route.CLOUD_VISION
         assert not decision.accepted
 
     def test_thin_data_thresholds_are_stricter_than_the_default(self):
@@ -239,7 +239,7 @@ class TestDiagnosisAssembly:
     def test_rejected_prediction_returns_no_diagnosis(self):
         decision, diagnosis = diagnose_on_device(SPLIT, crop_code="rice")
         assert diagnosis is None
-        assert decision.route is Route.CLAUDE_VISION
+        assert decision.route is Route.CLOUD_VISION
 
     def test_urgent_disease_always_flags_expert_review(self):
         decision = gate(
@@ -268,11 +268,11 @@ class TestDiagnosisAssembly:
         assert any("do not control bacterial" in n for n in diagnosis.notes)
         assert diagnosis.needs_expert_review
 
-    def test_claude_resolved_diagnosis_always_needs_review(self):
+    def test_cloud_resolved_diagnosis_always_needs_review(self):
         decision = gate(SPLIT, crop_code="rice")
         diagnosis = build_diagnosis(
             disease=get_disease("rice__brown_spot"), crop_code="rice",
-            confidence=0.6, resolved_by="claude_vision", decision=decision,
+            confidence=0.6, resolved_by="cloud_vision", decision=decision,
         )
         assert diagnosis.needs_expert_review
 

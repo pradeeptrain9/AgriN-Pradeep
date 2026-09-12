@@ -37,10 +37,10 @@ def _sources() -> dict[str, str]:
 
 def test_only_the_known_modules_call_the_api():
     calling = {
-        name for name, src in _sources().items() if "messages.create" in src
+        name for name, src in _sources().items() if "gemini.generate(" in src
     }
     assert calling == EXPECTED_CALL_SITES, (
-        "A new Claude call site appeared. Gate it with budget.check_budget "
+        "A new cloud-model call site appeared. Gate it with budget.check_budget "
         "before adding it here."
     )
 
@@ -58,7 +58,7 @@ def test_the_background_worker_never_calls_the_api():
     # A cron job that spends is the worst version of this bug: it bills with
     # nobody watching and no farmer waiting on the answer.
     worker = (APP / "worker.py").read_text()
-    for forbidden in ("messages.create", "anthropic", "narrate", "identify_with_vision"):
+    for forbidden in ("gemini.generate", "narrate", "identify_with_vision"):
         assert forbidden not in worker
 
 
@@ -84,7 +84,7 @@ def test_price_table_covers_every_configurable_model():
     from app.config import Settings
 
     defaults = Settings()
-    for model in (defaults.claude_narrate_model, defaults.claude_vision_model):
+    for model in (defaults.gemini_narrate_model, defaults.gemini_vision_model):
         assert model in RATES, (
             f"{model} is configured by default but has no price, so its spend "
             "would record as $0 and never reach the cap."

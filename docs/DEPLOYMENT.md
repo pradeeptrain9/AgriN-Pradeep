@@ -111,7 +111,7 @@ afterwards creates a second identity rather than renaming the first.
 | variable | needed for | without it |
 |---|---|---|
 | `CDSE_CLIENT_ID` / `CDSE_CLIENT_SECRET` | Sentinel-2 NDVI | Crop health reports `unknown` with a stated reason. Everything else works |
-| `ANTHROPIC_API_KEY` | narration, vision fallback | Deterministic English template is used; diagnoses that fail the gate return `inconclusive` |
+| `GEMINI_API_KEY` | narration, vision fallback | Deterministic English template is used; diagnoses that fail the gate return `inconclusive` |
 | `SECRET_KEY` | JWT signing, OTP hashing | **Must be changed.** `openssl rand -hex 32` |
 
 Register at <https://dataspace.copernicus.eu> for Copernicus. The free tier is
@@ -125,7 +125,7 @@ instance.
 ## 3b. Cloud diagnosis fallback
 
 The on-device model answers about 44% of photos. The other 56% fail the
-confidence gate and go to Claude vision. **Without `ANTHROPIC_API_KEY` those
+confidence gate and go to Gemini vision. **Without `GEMINI_API_KEY` those
 photos return `inconclusive`** with "show this to your extension officer" -- a
 safe, honest answer, but half your users get no diagnosis.
 
@@ -133,22 +133,33 @@ What the fallback does, in order:
 
 1. gate refuses (crop not covered, low confidence, split decision, or high entropy)
 2. the photo is re-encoded to <=640 px, stripping EXIF including GPS
-3. Claude is asked to choose from a **closed enum** of that crop's taxonomy
+3. The model is asked to choose from a **closed enum** of that crop's taxonomy
    classes, or answer `unknown`. It cannot invent a disease name.
 4. the on-device guess is deliberately **not** sent, so the model is not anchored
    to the answer we already decided was untrustworthy
 5. chemicals still come only from the verified allowlist, never from the model
 
-Measured cost per escalated photo at 448 px:
+Cost per escalated photo, from the rates in `app/ai/budget.py` (check them
+against <https://ai.google.dev/gemini-api/docs/pricing> before trusting the
+arithmetic -- they are rounded up on purpose, so the monthly cap binds early
+rather than not at all):
 
-| model | per photo | per 1,000 |
+| model | roughly, per photo | per 1,000 |
 |---|---|---|
-| claude-opus-5 | $0.0105 | $10.54 |
-| claude-sonnet-5 | $0.0042 | $4.21 |
-| claude-haiku-4-5 | $0.0021 | $2.11 |
+| gemini-2.5-pro | $0.032 | $32 |
+| gemini-2.5-flash | $0.005 | $5 |
+| gemini-2.0-flash | $0.001 | $1 |
 
-For 100 farmers scanning four leaves a month, 224 escalate: about **$2.35/month
-on opus-5, $0.47 on haiku-4-5**. Set `CLAUDE_VISION_MODEL` accordingly.
+For 100 farmers scanning four leaves a month, 224 escalate: about **$7/month on
+2.5-pro, $1 on 2.5-flash**. Set `GEMINI_VISION_MODEL` accordingly. Pro is the
+default because a misdiagnosis costs a farmer a spray or a season and the
+difference is a few dollars a month; drop to Flash only against measured accuracy
+on held-out photographs, not to save money in the abstract.
+
+Narration is a different trade and uses `GEMINI_NARRATE_MODEL`, defaulting to
+Flash. It only rephrases figures the engine already computed, and `ai/guard.py`
+rejects any number it invents -- so the safety property there is enforced by
+code, not by model strength.
 
 The call runs in a threadpool, not on the event loop -- a synchronous multi-second
 vision call inline in an async endpoint would stall every other request on the
@@ -416,7 +427,7 @@ from a stale satellite image without saying so, will not send farmer records to
 a peer, and will not let a language model invent a quantity. Those are enforced
 in code, not policy, and the tests fail if they regress.
 
-## Claude API key, and keeping the bill small
+## Gemini API key, and keeping the bill small
 
 The node runs without a key. On-device diagnosis answers about 44% of leaf
 photos, the rest return "inconclusive", and advisories use the deterministic
@@ -425,12 +436,12 @@ the model rephrase advisories into plainer language.
 
 ### Getting one
 
-1. Sign in at <https://console.anthropic.com>.
+1. Sign in at <https://aistudio.google.com/apikey>.
 2. **Settings -> API keys -> Create key.** Copy it once; it is not shown again.
 3. **Enable billing** under Settings -> Billing. A key on an org with no credit
    authenticates and then fails on every request, which shows up here as
    `cloud_diagnosis` degraded rather than as an obvious billing error.
-4. Put it in `backend/.env` as `ANTHROPIC_API_KEY=sk-ant-...` and restart the
+4. Put it in `backend/.env` as `GEMINI_API_KEY=AIza...` and restart the
    API. Never commit it; `.env` is gitignored and `.env.example` is the file
    that gets committed.
 5. Confirm with `curl localhost:8099/ready` -- `cloud_diagnosis` should read
@@ -443,16 +454,21 @@ cannot be raised by a bug in this code.
 ### What it costs
 
 Priced from the rates in `app/ai/budget.py` (verify against
-<https://www.anthropic.com/pricing> when changing models):
+<https://ai.google.dev/gemini-api/docs/pricing> when changing models):
 
-Measured against the live API on a real field, not estimated:
+**Estimated, not measured.** The figures below are token counts observed on a
+real advisory and a real 640 px leaf photograph, priced through
+`app/ai/budget.py`. The token counts are real; the prices are a rate table, and
+no live Gemini invoice has been reconciled against them yet. Treat them as the
+right order of magnitude and check `GET /quota`, which reports what this node
+actually recorded.
 
-| Call | Model | Cost |
+| Call | Model | Estimated cost |
 |---|---|---|
-| One advisory narration | `claude-opus-5` | $0.0449 |
-| One advisory narration | `claude-sonnet-5` | $0.0152 |
-| One advisory narration | `claude-haiku-4-5` | $0.0053 |
-| One leaf photo, cloud fallback | `claude-opus-5` | $0.0166 |
+| One advisory narration | `gemini-2.5-flash` | $0.0038 |
+| One advisory narration | `gemini-2.5-pro` | $0.0225 |
+| One leaf photo, cloud fallback | `gemini-2.5-pro` | $0.0320 |
+| One leaf photo, cloud fallback | `gemini-2.5-flash` | $0.0053 |
 
 **Narration dominates the bill, by roughly forty to one.** An advisory is read
 daily; a leaf photograph is occasional. Sizing a 20-farmer pilot with one field
@@ -499,23 +515,28 @@ raise `LLM_MONTHLY_USD_CAP`, or move narration to a cheaper model -- see below.
   mechanically rejects any figure absent from the computed advisory, and a
   rejected narration falls back to the template. The safety property is enforced
   by code, not by model quality -- so a weaker model produces plainer sentences
-  or gets rejected, and cannot produce a wrong number. Measured on a real
-  advisory, all three models above came back guard-clean.
+  or gets rejected, and cannot produce a wrong number.
 
-  Set `CLAUDE_NARRATE_MODEL=claude-haiku-4-5` for roughly an eighth the cost.
+  `GEMINI_NARRATE_MODEL` therefore defaults to `gemini-2.5-flash`: a weaker
+  model writes plainer sentences or gets rejected, and cannot write a wrong
+  number.
+
   Vision is a different judgement: there the model *is* the answer, nothing
   downstream can check it, and a wrong disease costs a spray or a season. Leave
-  `CLAUDE_VISION_MODEL` on `claude-opus-5` unless you have measured a cheaper
+  `GEMINI_VISION_MODEL` on `gemini-2.5-pro` unless you have measured a cheaper
   model on held-out photographs of your own crops.
 
-  Request parameters are model-aware (`ai/capabilities.py`): Sonnet 5 rejects
-  `fallbacks`, Haiku 4.5 rejects adaptive thinking and `effort`, and sending
-  either is a 400 that both call sites would swallow as "the cloud is
-  unavailable". Adding a model means adding a row there and a price in
-  `ai/budget.py`.
+  Request parameters are built in `ai/gemini.py`, which strips the JSON Schema
+  keywords Gemini's OpenAPI subset rejects -- `additionalProperties`, `$schema`
+  and friends. Sending one is a 400 for the whole request, which both call sites
+  would swallow as "the cloud is unavailable", so a schema change that looks
+  harmless can silently disable the feature. Adding a model means adding a price
+  in `ai/budget.py`; `rate_for()` matches by family prefix, because Gemini
+  reports the version it actually served (`gemini-2.5-flash-002`) and an
+  exact-match table would price that at zero.
 
 Prompt caching is **not** used, and would do nothing here: both system prompts
-are under 250 tokens, below Claude Opus 5's 512-token minimum cacheable prefix,
+are short enough that implicit context caching does not engage,
 so a `cache_control` marker would be silently ignored.
 
 ### Watching the spend
@@ -524,7 +545,7 @@ so a `cache_control` marker would be silently ignored.
 curl -H "Authorization: Bearer <token>" localhost:8099/quota
 ```
 
-Returns the month's Claude spend against the cap, this user's checks today, and
+Returns the month's model spend against the cap, this user's checks today, and
 the Copernicus processing units alongside. Per-call detail, including which
 feature spent it, is in the `llm_ledger` table.
 

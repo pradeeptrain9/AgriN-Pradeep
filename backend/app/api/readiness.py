@@ -166,7 +166,7 @@ async def readiness(db: AsyncSession = Depends(get_db)) -> dict:
         ))
 
     # --- cloud diagnosis fallback
-    if not settings.anthropic_api_key:
+    if not settings.gemini_api_key:
         checks.append(_check(
             "cloud_diagnosis", "degraded", "no ANTHROPIC_API_KEY",
             "About 56% of leaf photos fail the on-device confidence gate and "
@@ -191,8 +191,8 @@ async def readiness(db: AsyncSession = Depends(get_db)) -> dict:
             # cheaper one had been chosen.
             checks.append(_check(
                 "cloud_diagnosis", "ok",
-                f"vision {settings.claude_vision_model}, "
-                f"narration {settings.claude_narrate_model}, "
+                f"vision {settings.gemini_vision_model}, "
+                f"narration {settings.gemini_narrate_model}, "
                 f"${usd:.2f} of ${cap:.2f} used this month"))
 
     # --- districts drive aggregate grouping

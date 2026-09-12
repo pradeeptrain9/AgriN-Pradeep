@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS advisories (
     generated_at    timestamptz NOT NULL DEFAULT now(),
     engine_version  text NOT NULL,
     payload         jsonb NOT NULL,     -- deterministic engine output
-    narration       jsonb,              -- Claude output, per language
+    narration       jsonb,              -- model narration, per language
     lang            text NOT NULL DEFAULT 'en'
 );
 CREATE INDEX IF NOT EXISTS advisories_field_idx ON advisories (field_id, generated_at DESC);
@@ -144,13 +144,13 @@ CREATE TABLE IF NOT EXISTS diagnoses (
     on_device_entropy double precision,
     server_label      text,
     server_conf       double precision,
-    resolved_by       text NOT NULL,    -- on_device | claude_vision | inconclusive
+    resolved_by       text NOT NULL,    -- on_device | cloud_vision | inconclusive
     treatment         jsonb,
     created_at        timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS diagnoses_user_idx ON diagnoses (user_id, created_at DESC);
 
--- Country-scoped registered-product allowlist. Claude may only name products
+-- Country-scoped registered-product allowlist. A model may only name products
 -- that appear here; anything else is stripped before the advice is returned.
 CREATE TABLE IF NOT EXISTS pesticides (
     id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),

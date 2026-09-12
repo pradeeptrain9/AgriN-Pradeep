@@ -1,0 +1,496 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>AgriN — pitch deck</title>
+<style>
+  :root {
+    --ink: #14251a;
+    --mid: #4a5c50;
+    --soft: #6b7c71;
+    --green: #1b7a3e;
+    --green-dark: #12532a;
+    --wash: #f4f7f4;
+    --line: #d9e2db;
+    --warn: #9a5b16;
+    --bad: #a4342a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #8d998f; }
+  body {
+    font: 16px/1.5 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  .slide {
+    width: 1280px; height: 720px;
+    background: #fff;
+    margin: 24px auto;
+    padding: 56px 72px;
+    position: relative;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .num {
+    position: absolute; right: 40px; bottom: 28px;
+    font-size: 13px; color: var(--soft); letter-spacing: .04em;
+  }
+  .brand {
+    position: absolute; left: 72px; bottom: 28px;
+    font-size: 13px; color: var(--soft); letter-spacing: .06em; text-transform: uppercase;
+  }
+  .kicker {
+    font-size: 13px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--green); font-weight: 700; margin-bottom: 14px;
+  }
+  h1 { font-size: 60px; line-height: 1.05; margin: 0 0 20px; letter-spacing: -.02em; }
+  h2 { font-size: 38px; line-height: 1.12; margin: 0 0 22px; letter-spacing: -.015em; }
+  p  { font-size: 19px; line-height: 1.55; margin: 0 0 14px; color: var(--mid); max-width: 62ch; }
+  strong { color: var(--ink); font-weight: 700; }
+  .lead { font-size: 23px; color: var(--ink); max-width: 66ch; }
+  ul { margin: 0 0 14px; padding-left: 22px; }
+  li { font-size: 18px; line-height: 1.6; color: var(--mid); margin-bottom: 8px; max-width: 60ch; }
+  /* align-items:start so a short card sits at its natural height instead of
+     stretching down the column and leaving a pool of dead space under the text. */
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; flex: 1; align-items: start; }
+  .cols3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px; }
+  .card {
+    background: var(--wash); border: 1px solid var(--line);
+    border-radius: 10px; padding: 22px 24px;
+  }
+  .card h3 { margin: 0 0 8px; font-size: 17px; letter-spacing: .02em; }
+  .card p { font-size: 15.5px; margin: 0; line-height: 1.5; }
+  .stat { font-size: 46px; font-weight: 700; color: var(--green); line-height: 1; letter-spacing: -.02em; }
+  .stat-sm { font-size: 34px; }
+  .stat-label { font-size: 14.5px; color: var(--soft); margin-top: 8px; line-height: 1.4; }
+  table { border-collapse: collapse; width: 100%; margin-top: 6px; }
+  th, td { text-align: left; padding: 9px 12px; font-size: 16px; border-bottom: 1px solid var(--line); }
+  th { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--soft); font-weight: 700; }
+  td.n { font-variant-numeric: tabular-nums; }
+  code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .92em; background: var(--wash); padding: 1px 5px; border-radius: 4px;
+  }
+  .rule { height: 3px; width: 64px; background: var(--green); margin: 0 0 22px; }
+  .quote {
+    border-left: 4px solid var(--green); padding: 6px 0 6px 22px;
+    font-size: 25px; line-height: 1.4; color: var(--ink); max-width: 58ch;
+  }
+  .flow { display: flex; align-items: stretch; gap: 0; margin: 10px 0 18px; }
+  .flow div {
+    flex: 1; background: var(--wash); border: 1px solid var(--line);
+    padding: 14px 12px; font-size: 14.5px; line-height: 1.4; text-align: center;
+    position: relative; color: var(--mid);
+  }
+  .flow div:not(:last-child) { border-right: none; }
+  .flow b { display: block; color: var(--ink); font-size: 15.5px; margin-bottom: 3px; }
+  .tag {
+    display: inline-block; font-size: 12px; letter-spacing: .07em; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 20px; font-weight: 700;
+  }
+  .tag.ok { background: #e3f0e7; color: var(--green-dark); }
+  .tag.part { background: #f7ecdb; color: var(--warn); }
+  .tag.no { background: #f7e3e1; color: var(--bad); }
+  .title-slide { justify-content: center; }
+  .title-slide h1 { font-size: 88px; }
+  .footnote { font-size: 13.5px; color: var(--soft); margin-top: auto; padding-top: 14px; max-width: 82ch; line-height: 1.5; }
+
+  @page { size: 1280px 720px; margin: 0; }
+  @media print {
+    html, body { background: #fff; }
+    .slide { margin: 0; page-break-after: always; box-shadow: none; }
+    .slide:last-child { page-break-after: auto; }
+  }
+</style>
+
+<!-- 1 ───────────────────────────────────────────── -->
+<section class="slide title-slide">
+  <div class="kicker">Digital public good · Agriculture</div>
+  <h1>AgriN</h1>
+  <p class="lead" style="font-size:27px;max-width:60ch;">
+    Field-specific farm advice for Indian smallholders, from satellite, weather and
+    ISRO soil data — with crop-disease diagnosis that runs on the phone itself.
+  </p>
+  <p style="margin-top:26px;font-size:17px;">
+    <strong>Every number is computed. Gemini only explains it.</strong>
+  </p>
+  <div class="brand">agrin-node-in.onrender.com · Apache-2.0</div>
+  <div class="num">1</div>
+</section>
+
+<!-- 2 ───────────────────────────────────────────── -->
+<section class="slide">
+  <div class="kicker">The problem</div>
+  <h2>Advice exists. It just isn't about your field.</h2>
+  <div class="rule"></div>
+  <div class="cols">
+    <div>
+      <p><strong>Advisories are issued per district.</strong> A district is
+      thousands of square kilometres and hundreds of soil types. Two farmers
+      three kilometres apart, on sand and on clay, get the same irrigation
+      advice. One of them is wrong.</p>
+      <p><strong>The advice arrives as a broadcast</strong> — a bulletin, an SMS
+      blast — with no way to ask "what about mine?"</p>
+    </div>
+    <div>
+      <p><strong>And the new AI farm assistants hallucinate doses.</strong> A
+      chatbot that invents "apply 120 kg of urea" is not a smaller version of
+      good advice. It is a crop-failure liability with a friendly tone.</p>
+      <div class="card" style="margin-top:20px;">
+        <h3>The gap we target</h3>
+        <p>Per-field, computed, explainable — and in a language the farmer
+        actually reads or hears.</p>
+      </div>
+    </div>
+  </div>
+  <div class="brand">AgriN</div><div class="num">2</div>
+</section>
+
+<!-- 3 ───────────────────────────────────────────── -->
+<section class="slide">
+  <div class="kicker">Who it serves</div>
+  <h2>The 86% who farm under two hectares</h2>
+  <div class="rule"></div>
+  <div class="cols3" style="margin-bottom:26px;">
+    <div class="card">
+      <div class="stat">&lt; 2 ha</div>
+      <div class="stat-label">Small and marginal holdings — the overwhelming
+      majority of Indian farms, and the least served by extension services.</div>
+    </div>
+    <div class="card">
+      <div class="stat">1 : 1,000s</div>
+      <div class="stat-label">Extension officer to farmer ratios make
+      per-field human advice impossible at scale.</div>
+    </div>
+    <div class="card">
+      <div class="stat">6</div>
+      <div class="stat-label">Languages with written <em>and spoken</em>
+      advisories today: English, Hindi, Punjabi, Bengali, Marathi, Telugu.</div>
+    </div>
+  </div>
+  <p><strong>Design consequence, not a footnote:</strong> agricultural literacy
+  skews lower, older and more female than the national average. An app that only
+  writes excludes the people it is for. Every advisory can be listened to.</p>
+  <p class="footnote">Nothing in the product assumes a smartphone-literate user,
+  a reliable connection, or the ability to read a paragraph. On-device diagnosis
+  works with the network off; the deterministic template works with no API key at all.</p>
+  <div class="brand">AgriN</div><div class="num">3</div>
+</section>
+
+<!-- 4 ───────────────────────────────────────────── -->
+<section class="slide">
+  <div class="kicker">The solution</div>
+  <h2>One loop, end to end, working today</h2>
+  <div class="rule"></div>
+  <div class="flow">
+    <div><b>Map the field</b>Walk the boundary, or draw it on satellite imagery</div>
+    <div><b>Set crop &amp; sowing</b>14 crops, FAO-56 coefficients</div>
+    <div><b>Node ingests</b>Sentinel-2 NDVI, weather, ISRO soil</div>
+    <div><b>Engine computes</b>Water balance, N-P-K, crop health</div>
+    <div><b>Gemini explains</b>In the farmer's language, read aloud</div>
+  </div>
+  <div class="cols">
+    <div>
+      <p><strong>Plus disease diagnosis from a leaf photograph</strong>, which
+      needs no field mapped at all — a 1.14 MB network runs on the handset, with
+      no signal and no data cost.</p>
+      <ul>
+        <li>FAO-56 Penman–Monteith reference evapotranspiration</li>
+        <li>Soil-water balance, with a separate ponded model and IRRI safe AWD for paddy</li>
+        <li>Nitrogen, phosphorus, potassium from crop removal and soil fertility class</li>
+        <li>Crop health: NDVI against the expected curve for that crop and growth stage</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Verified end to end on a real field</h3>
+      <p>Punjab, 0.97 ha: <strong>205 days of weather</strong> and
+      <strong>72 Sentinel-2 observations</strong> ingested, 26 intervals
+      correctly rejected for cloud, advisory rendered and narrated.</p>
+      <p style="margin-top:12px;"><strong>724 backend tests, 106 mobile tests.</strong>
+      Both FAO-56 chapter 4 worked examples reproduced exactly.</p>
+    </div>
+  </div>
+  <div class="brand">AgriN</div><div class="num">4</div>
+</section>
+
+<!-- 5 ───────────────────────────────────────────── -->
+<section class="slide">
+  <div class="kicker">The governing rule</div>
+  <h2>The model never produces a number</h2>
+  <div class="rule"></div>
+  <div class="quote">Every recommended quantity is computed deterministically.
+  Gemini only translates and explains those numbers — it never produces them.</div>
+  <div class="cols" style="margin-top:28px;">
+    <div>
+      <p>This is not a prompt instruction. <code>ai/guard.py</code> extracts every
+      figure the model wrote and every figure the engine computed, and
+      <strong>rejects the narration if the model produced one the engine did
+      not.</strong></p>
+      <p>Rejection triggers one corrective round naming the offending figures.
+      Fail twice and the farmer sees the deterministic template — the same advice,
+      plainer words.</p>
+    </div>
+    <div class="card">
+      <h3>Proof it belongs to the system, not the vendor</h3>
+      <p>The cloud model was swapped from one provider to Gemini in an afternoon.
+      <strong><code>guard.py</code> was not touched.</strong> Not one line.</p>
+      <p style="margin-top:12px;">If the safety property had lived in the vendor
+      integration, replacing the vendor would have broken it.</p>
+    </div>
+  </div>
+  <p class="footnote">The same principle governs chemicals: pesticide doses and
+  pre-harvest intervals are served only from rows verified against the national
+  register. That table ships empty, so an unverified node gives cultural and
+  preventive advice only. A model can never introduce a product name.</p>
+  <div class="brand">AgriN</div><div class="num">5</div>
+</section>
+
+<!-- 6 ───────────────────────────────────────────── -->
+<section class="slide">
+  <div class="kicker">AI approach</div>
+  <h2>Where Google AI does the work</h2>
+  <div class="rule"></div>
+  <table>
+    <tr><th>Service</th><th>Job</th><th>Why it is the right tool</th></tr>
+    <tr><td><strong>Gemini 2.5 Flash</strong></td><td>Advisory narration</td>
+        <td>Rephrases computed figures into plain language, natively multilingual. Guard-checked.</td></tr>
+    <tr><td><strong>Gemini 2.5 Pro</strong></td><td>Escalated disease diagnosis</td>
+        <td>Multimodal. Sees only the photographs the on-device model refused — the hard half.</td></tr>
+    <tr><td><strong>Cloud Text-to-Speech</strong></td><td>Spoken advisories</td>
+        <td>Six Indian locales. Synthesised from guard-passed text only.</td></tr>
+    <tr><td><strong>Cloud Translation</strong></td><td>Template fallback</td>
+        <td>Translates the deterministic wording, rejecting any translation that moves a digit.</td></tr>
+    <tr><td><strong>Maps Platform</strong></td><td>Satellite basemap</td>
+        <td>Street tiles give a farmer nothing to trace; imagery shows the actual field edge.</td></tr>
+    <tr><td><strong>Vertex AI</strong></td><td>Same CNN, served</td>
+        <td>For handsets whose TFLite delegate will not load — not a replacement for on-device.</td></tr>
+    <tr><td><strong>Earth Engine · BigQuery · Cloud Run</strong></td><td>Scale path</td>
+        <td>Second NDVI supply past the Copernicus quota; national aggregate queries; ministry-native hosting.</td></tr>
+  </table>
+  <p class="footnote">Each fails closed and is optional: a node with no key still
+  computes the same irrigation depth and renders it through the deterministic
+  template. The engine has no dependency on any model — which is what makes the
+  guarantee on slide 5 credible rather than aspirational.</p>
+  <div class="brand">AgriN</div><div class="num">6</div>
+</section>
+
+<!-- 7 ───────────────────────────────────────────── -->
+<section class="slide">
+  <div class="kicker">On-device vision</div>
+  <h2>It abstains more often than it answers</h2>
+  <div class="rule"></div>
+  <div class="cols3" style="margin-bottom:24px;">
+    <div class="card">
+      <div class="stat">0.981</div>
+      <div class="stat-label">Accuracy of predictions <strong>actually shown to a
+      farmer</strong> — those clearing the on-device confidence gate.</div>
+    </div>
+    <div class="card">
+      <div class="stat stat-sm">44.4%</div>
+      <div class="stat-label">Of photographs answered on the handset. The rest
+      escalate to Gemini or return inconclusive.</div>
+    </div>
+    <div class="card">
+      <div class="stat stat-sm">1.14 MB</div>
+      <div class="stat-label">Model size. Runs offline, on a low-end Android, at
+      no data cost.</div>
+    </div>
+  </div>
+  <div class="cols">
+    <div>
+      <p><strong>The gate is the product.</strong> Raw model accuracy is 0.786.
+      Confidence, margin and entropy thresholds convert that into 0.981 on what
+      reaches a farmer, by refusing the rest.</p>
+      <p>A wrong confident answer costs a season. "Unknown" costs a second photo.</p>
+    </div>
+    <div class="card">
+      <h3>What we will not claim</h3>
+      <p>We hold a 0.994 figure on a 1,677-image test slice. It is the
+      <strong>same collection</strong> as part of the training data and covers 4
+      of 10 classes. Our own model card says it
+      <strong>must not be quoted</strong> as a cross-collection result — so it
+      isn't, here or anywhere.</p>
+    </div>
+  </div>
+  <div class="brand">AgriN</div><div class="num">7</div>
+</section>
+
+<!-- 8 ───────────────────────────────────────────── -->
+<section class="slide">
+  <div class="kicker">Real data, India first</div>
+  <h2>Live sources — and one that mattered more than expected</h2>
+  <div class="rule"></div>
+  <div class="cols">
+    <div>
+      <table>
+        <tr><th>Layer</th><th>Source</th></tr>
+        <tr><td>Satellite</td><td>Copernicus Sentinel-2 L2A, SCL cloud-masked</td></tr>
+        <tr><td>Weather</td><td>Open-Meteo → NASA POWER → MET Norway</td></tr>
+        <tr><td>Soil</td><td>Soil Health Card → farmer feel-test → SoilGrids → <strong>ISRO Bhuvan</strong></td></tr>
+        <tr><td>Agronomy</td><td>FAO-56 tables 11, 12, 19, 22</td></tr>
+      </table>
+      <p style="margin-top:16px;">Every figure carries its provenance to the
+      farmer's screen — including when it is a regional estimate rather than a
+      measurement of their own field.</p>
+    </div>
+    <div class="card">
+      <h3>SoilGrids returns null across all of India</h3>
+      <p>Verified against a Brazilian control, which answers normally. So the
+      node fell back to assuming <strong>loam</strong> for every field in the
+      country.</p>
+      <p style="margin-top:12px;">ISRO's Bhuvan national soil map says the test
+      field is <strong>loamy sand</strong>. FAO-56 Table 19: loam holds 130 mm of
+      available water per metre; loamy sand holds 80.</p>
+      <p style="margin-top:12px;"><strong>The node had been overstating that
+      field's water reservoir by more than half</strong> — directly into the
+      irrigation decision.</p>
+    </div>
+  </div>
+  <p class="footnote">Fallback chains, never blends. A figure is always from one
+  named source, so an error can be traced to it rather than averaged into
+  invisibility.</p>
+  <div class="brand">AgriN</div><div class="num">8</div>
+</section>
+
+<!-- 9 ───────────────────────────────────────────── -->
+<section class="slide">
+  <div class="kicker">Depth across India</div>
+  <h2>One node per state. Same code, sovereign data.</h2>
+  <div class="rule"></div>
+  <div class="cols">
+    <div>
+      <p><strong>Nodes exchange models and aggregate statistics. Never raw
+      farmer data.</strong></p>
+      <ul>
+        <li>District-level aggregates only, with <strong>k-anonymity and
+        complementary suppression</strong> enforced structurally</li>
+        <li>Every published payload <strong>Ed25519-signed</strong> over canonical
+        JSON, so it cannot be replayed under another node's name</li>
+        <li>A publish is <strong>aborted</strong> if an identifier is detected in
+        the payload — checked again on the BigQuery export path</li>
+        <li>EXIF and GPS stripped from every uploaded photograph</li>
+      </ul>
+      <p>A state department runs its own node, holds its own farmers' data, and
+      still contributes to — and benefits from — a national picture.</p>
+    </div>
+    <div class="card">
+      <h3>Why this shape, not a central platform</h3>
+      <p>A single national database of every farmer's field boundaries and yields
+      is a target and a governance problem. Federation means
+      <strong>no one has to hold it</strong>.</p>
+      <p style="margin-top:12px;">It is also the only shape that survives the
+      politics: states adopt what they control.</p>
+      <p style="margin-top:12px;">Standards are boring on purpose — AGROVOC crop
+      concepts, UCUM units, GeoJSON RFC 7946, OpenAPI 3.1 — so a second
+      implementation can interoperate without asking us.</p>
+    </div>
+  </div>
+  <div class="brand">AgriN</div><div class="num">9</div>
+</section>
+
+<!-- 10 ──────────────────────────────────────────── -->
+<section class="slide">
+  <div class="kicker">Deployability</div>
+  <h2>It is deployed, and it grades itself</h2>
+  <div class="rule"></div>
+  <div class="cols">
+    <div>
+      <p>A live node runs at <code>agrin-node-in.onrender.com</code>. The same
+      container deploys to <strong>Cloud Run</strong> unchanged, for a ministry
+      that already lives inside Google Cloud.</p>
+      <p><code>GET /ready</code> is the node's own honest self-assessment. Every
+      check names the <em>user-visible consequence</em>, not an internal state,
+      and is graded <span class="tag no">blocker</span>
+      <span class="tag part">degraded</span> <span class="tag ok">ok</span>.</p>
+      <p>It currently reports <strong>one blocker: no SMS provider</strong>, so
+      no farmer can sign in yet. It says so itself, in public, rather than
+      waiting to be found out.</p>
+    </div>
+    <div class="card">
+      <h3>Weeks, not quarters — what a pilot needs</h3>
+      <table style="margin-top:4px;">
+        <tr><td>SMS aggregator (DLT-registered)</td><td class="n">1–3 weeks</td></tr>
+        <tr><td>Pesticide rows verified by an agronomist</td><td class="n">days</td></tr>
+        <tr><td>Persistent photo storage</td><td class="n">hours</td></tr>
+        <tr><td>District mapping for aggregates</td><td class="n">hours</td></tr>
+      </table>
+      <p style="margin-top:14px;">None is research. All are procurement or
+      configuration — which is why <code>docs/PILOT.md</code> scopes a 15–25
+      farmer pilot in one district with a working extension officer.</p>
+    </div>
+  </div>
+  <div class="brand">AgriN</div><div class="num">10</div>
+</section>
+
+<!-- 11 ──────────────────────────────────────────── -->
+<section class="slide">
+  <div class="kicker">Honest status</div>
+  <h2>What is not finished</h2>
+  <div class="rule"></div>
+  <p class="lead" style="margin-bottom:22px;">A prototype that hides its gaps is
+  harder to deploy, not easier. Assessed against all nine DPG Alliance indicators
+  — including the two it does not meet.</p>
+  <div class="cols3">
+    <div class="card">
+      <h3><span class="tag no">Blocker</span></h3>
+      <p style="margin-top:10px;"><strong>SMS delivery.</strong> No farmer can
+      sign in until a DLT-registered aggregator is configured. Deliberate: we
+      will not enrol a farmer on a login we cannot deliver.</p>
+    </div>
+    <div class="card">
+      <h3><span class="tag part">Partial</span></h3>
+      <p style="margin-top:10px;"><strong>Platform independence.</strong> The
+      node now calls Google. Every service fails closed and the engine needs
+      none of them — but keyless, the farmer loses plain language in their own
+      tongue. We downgraded our own DPG score rather than argue.</p>
+    </div>
+    <div class="card">
+      <h3><span class="tag part">Partial</span></h3>
+      <p style="margin-top:10px;"><strong>Independent review.</strong> No
+      external agronomic review of the recommendation logic, and no DPIA. Both
+      need people, not code. Neither is bluffed.</p>
+    </div>
+  </div>
+  <p class="footnote" style="margin-top:26px;">Also stated plainly in the repo:
+  the disease model is rice-only, so the other 13 crops route to Gemini and
+  receive a name with no treatment attached; the Earth Engine adapter has not
+  been verified against the live service; and Open-Meteo's free tier is
+  non-commercial, so a paid deployment needs their commercial tier or a
+  self-hosted instance.</p>
+  <div class="brand">AgriN</div><div class="num">11</div>
+</section>
+
+<!-- 12 ──────────────────────────────────────────── -->
+<section class="slide">
+  <div class="kicker">Impact &amp; what happens next</div>
+  <h2>Water and nitrogen, which is where the leverage is</h2>
+  <div class="rule"></div>
+  <div class="cols">
+    <div>
+      <p>Punjab's groundwater is falling. Nitrogen is over-applied across the
+      Indo-Gangetic plain. Both are <strong>decisions taken field by field</strong>,
+      weekly, by millions of people working from a district bulletin.</p>
+      <p>AgriN does not ask a farmer to trust a model. It tells them the number,
+      where it came from, and how confident it is — including when the answer is
+      "we don't know".</p>
+      <ul>
+        <li><strong>SDG 2.3 / 2.4</strong> — smallholder productivity and resilience</li>
+        <li><strong>SDG 6.4</strong> — water-use efficiency, via the AWD paddy model</li>
+        <li><strong>SDG 13</strong> — reduced methane from AWD and reduced nitrogen loss</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Next 90 days</h3>
+      <p><strong>Weeks 1–3.</strong> SMS aggregator, persistent storage,
+      agronomist-verified pesticide rows for one state.</p>
+      <p style="margin-top:12px;"><strong>Weeks 4–10.</strong> 15–25 farmer pilot
+      in one district with an extension officer, measuring whether the advice is
+      <em>followed</em> — not whether the app works.</p>
+      <p style="margin-top:12px;"><strong>Weeks 11–13.</strong> Second crop
+      model trained on pilot corrections; second node stood up to prove
+      federation between two operators.</p>
+    </div>
+  </div>
+  <p class="footnote"><strong>Numbers from FAO-56. Words from Gemini. Never the
+  reverse.</strong> &nbsp;·&nbsp; Code Apache-2.0, data CC-BY-4.0 &nbsp;·&nbsp;
+  agrin-node-in.onrender.com</p>
+  <div class="brand">AgriN</div><div class="num">12</div>
+</section>

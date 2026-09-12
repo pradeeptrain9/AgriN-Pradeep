@@ -37,24 +37,68 @@ def make_image(size=(2000, 1500), with_exif=True) -> bytes:
 
 
 class StubResponse:
-    def __init__(self, data, stop_reason="end_turn"):
+    """Shaped like what gemini.generate returns, which is all the code sees."""
+
+    def __init__(self, data, stop_reason=None, model="gemini-2.5-pro"):
         text = data if isinstance(data, str) else json.dumps(data)
         self.content = [SimpleNamespace(type="text", text=text)]
         self.stop_reason = stop_reason
-        self.model = "claude-opus-5"
+        self.model = model
+        self.usage = SimpleNamespace(
+            input_tokens=100, output_tokens=40,
+            cache_read_input_tokens=0, cache_creation_input_tokens=0,
+        )
 
 
 class StubClient:
+    """Kept as a shim so each test still reads as "queue a response".
+
+    Installing it patches gemini.generate, because the code now calls that
+    module function directly instead of taking an injected SDK client.
+    """
+
+    _monkeypatch = None
+
     def __init__(self, response):
         self.calls = []
-        outer = self
+        if isinstance(response, list):
+            queue = list(response)
+            take = lambda: queue.pop(0)
+        else:
+            take = lambda: response
 
-        class Messages:
-            def create(self, **kwargs):
-                outer.calls.append(kwargs)
-                return response
+        def generate(**kwargs):
+            self.calls.append(kwargs)
+            return take()
 
-        self.beta = SimpleNamespace(messages=Messages())
+        from app.ai import gemini
+        from app.config import get_settings
+
+        get_settings.cache_clear()
+        StubClient._monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        StubClient._monkeypatch.setattr(gemini, "generate", generate)
+
+
+class RaisingClient(StubClient):
+    def __init__(self, exc):
+        self.calls = []
+
+        def generate(**kwargs):
+            raise exc
+
+        from app.ai import gemini
+        from app.config import get_settings
+
+        get_settings.cache_clear()
+        StubClient._monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        StubClient._monkeypatch.setattr(gemini, "generate", generate)
+
+
+@pytest.fixture(autouse=True)
+def _wire_stub_clients(monkeypatch):
+    StubClient._monkeypatch = monkeypatch
+    yield
+    StubClient._monkeypatch = None
 
 
 class TestImagePreparation:
@@ -135,7 +179,7 @@ class TestIdentification:
             "image_quality_issue": None,
         }))
         result = identify_with_vision(
-            make_image(), crop_code="rice", crop_label="Rice (paddy)", client=client
+            make_image(), crop_code="rice", crop_label="Rice (paddy)"
         )
         assert result.identified
         assert result.disease_code == "rice__blast"
@@ -150,7 +194,7 @@ class TestIdentification:
             "visible_symptoms": "x", "image_quality_issue": None,
         }))
         identify_with_vision(
-            make_image(), crop_code="rice", crop_label="Rice (paddy)", client=client
+            make_image(), crop_code="rice", crop_label="Rice (paddy)"
         )
         sent = json.dumps(client.calls[0], default=str)
         assert "0.40" not in sent and "on-device" not in sent.lower()
@@ -162,7 +206,7 @@ class TestIdentification:
             "image_quality_issue": "blurred",
         }))
         result = identify_with_vision(
-            make_image(), crop_code="rice", crop_label="Rice (paddy)", client=client
+            make_image(), crop_code="rice", crop_label="Rice (paddy)"
         )
         assert not result.identified
         assert result.disease_code is None
@@ -174,7 +218,7 @@ class TestIdentification:
             "visible_symptoms": "", "image_quality_issue": "too dark",
         }))
         result = identify_with_vision(
-            make_image(), crop_code="rice", crop_label="Rice", client=client
+            make_image(), crop_code="rice", crop_label="Rice"
         )
         assert any("too dark" in n for n in result.notes)
 
@@ -184,7 +228,7 @@ class TestIdentification:
             "visible_symptoms": "x", "image_quality_issue": None,
         }))
         result = identify_with_vision(
-            make_image(), crop_code="rice", crop_label="Rice", client=client
+            make_image(), crop_code="rice", crop_label="Rice"
         )
         assert not result.identified
 
@@ -194,14 +238,14 @@ class TestIdentification:
                                           "image_quality_issue": None},
                                          stop_reason="refusal"))
         result = identify_with_vision(
-            make_image(), crop_code="rice", crop_label="Rice", client=client
+            make_image(), crop_code="rice", crop_label="Rice"
         )
         assert not result.identified
 
     def test_unreadable_answer_yields_no_identification(self):
         client = StubClient(StubResponse("not json"))
         result = identify_with_vision(
-            make_image(), crop_code="rice", crop_label="Rice", client=client
+            make_image(), crop_code="rice", crop_label="Rice"
         )
         assert not result.identified
 
@@ -223,7 +267,7 @@ class TestIdentification:
             "visible_symptoms": "lesions", "image_quality_issue": None,
         }))
         result = identify_with_vision(
-            make_image(), crop_code="rice", crop_label="Rice", client=client
+            make_image(), crop_code="rice", crop_label="Rice"
         )
         assert any("Confirm it with your extension officer" in n for n in result.notes)
 

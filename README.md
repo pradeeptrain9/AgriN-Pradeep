@@ -29,8 +29,8 @@ output is validated so that every figure it prints also appears in the input.
 | Soil (`providers/soil.py`) | Done. Four-source priority chain |
 | Satellite (`providers/sentinel.py`) | **Done, verified live against Copernicus.** A real field ingested 57 observations for 1.63 PU, with 30 of 49 intervals rejected for cloud. Crop health reaches the phone as plain language: "Greenness 0.20 against 0.38 expected at this stage. Last clear picture was 24 days ago" |
 | REST API | Auth, fields, crop, soil, refresh, advisory, quota |
-| Claude narration | **Done, verified live.** Guard came back clean on the first real call and on every model tried; each figure traces to the engine. Reused until the advice itself changes, so screen reloads are free |
-| Claude spend control | Done. Every call priced from the API's own `usage` into `llm_ledger`; hard monthly USD cap and a per-user daily cap, both checked **before** the call. Visible on `/quota` and `/ready` |
+| Gemini narration | **Done, verified live.** Guard came back clean on the first real call and on every model tried; each figure traces to the engine. Reused until the advice itself changes, so screen reloads are free |
+| Gemini spend control | Done. Every call priced from the API's own `usage` into `llm_ledger`; hard monthly USD cap and a per-user daily cap, both checked **before** the call. Visible on `/quota` and `/ready` |
 | Paying twice for the same answer | Prevented on both paths. A narration is reused until the advice changes; a cloud diagnosis is reused for a byte-identical photograph. Verified live: 3 advisory requests billed 1 call, 2 identical leaf submissions billed 1 call |
 | Disease gate + taxonomy | Done. Coverage-first gate, IPM advice, verified-only chemicals |
 | Disease endpoints | Done. `/diagnoses` with EXIF stripping and on-device gate |

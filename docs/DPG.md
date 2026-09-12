@@ -8,12 +8,43 @@ Honest status, including what is not met yet.
 | 1 | Relevance to an SDG | **Met** | SDG 2 (Zero Hunger), targets 2.3 and 2.4. Also SDG 6.4 via the AWD water model and SDG 13 via reduced methane and nitrogen loss |
 | 2 | Open licence | **Met** | Code Apache-2.0, documentation and published data CC-BY-4.0, declared in every node descriptor and signed envelope |
 | 3 | Clear ownership | **Met** | `NOTICE` records copyright and contribution terms |
-| 4 | Platform independence | **Met** | No proprietary dependency. Postgres/PostGIS, Python, React Native, MapLibre. No Mapbox token, no hosted vector-tile key, no managed cloud service |
+| 4 | Platform independence | **Partial** | The stack is open: Postgres/PostGIS, Python, React Native, MapLibre, self-hostable on any Docker host. But a node now calls Google for narration and diagnosis (Gemini), and optionally for basemap tiles and text-to-speech. Each fails closed and the node runs without it. What is lost without a key is plain-language advice in the farmer's own language, which for a low-literacy audience is most of the product. See below |
 | 5 | Documentation | **Met** | `README.md`, `docs/DEPLOYMENT.md`, `training/README.md`, `federation/README.md`, `docs/DPG.md`, plus `/federation/conformance` served by the node itself |
 | 6 | Mechanism for data extraction | **Met** | `GET /fields`, `/fields/{id}/advisory`, `/diagnoses` return a farmer's own data as JSON. `/federation/aggregates` exports node-level statistics |
 | 7 | Privacy and applicable laws | **Partial** | k-anonymity enforced structurally, EXIF/GPS stripped from uploads, raw farmer data never federated, cleartext HTTP refused for non-loopback hosts. A DPDP Act (India) and LGPD (Brazil) review has not been done, and there is no data-retention policy yet |
 | 8 | Standards and best practices | **Met** | AGROVOC crop concepts, UCUM units, GeoJSON RFC 7946, RFC 3339 timestamps, OpenAPI 3.1, Ed25519 signatures |
 | 9 | Do no harm by design | **Partial** | See below. A grievance mechanism now exists (`/feedback`, harm reports never blocked and surfaced for human triage); independent agronomic review and a DPIA are still outstanding |
+
+## Indicator 4 in detail
+
+This used to read **Met**, on the strength of having no vendor API key anywhere
+in the stack. That is no longer true, and downgrading it is more useful than
+arguing the old wording still fits.
+
+What actually depends on Google now:
+
+| Service | Used for | Without it |
+|---|---|---|
+| Gemini | Narration, cloud disease diagnosis | Deterministic English template; escalated photos return `inconclusive` |
+| Maps Platform | Satellite basemap for drawing a field | OpenStreetMap street tiles -- a working map, but no field edges to trace against |
+| Cloud TTS | Spoken advisories | Text only |
+| Cloud Translation | Translating the template fallback | Template stays in English |
+| Vertex AI, Earth Engine, BigQuery | Optional; off unless configured | No change |
+
+Every one fails closed, so an operator who wants a vendor-free node has one: it
+computes the same irrigation depths, the same fertiliser plan, the same NDVI
+anomaly, and renders them through the deterministic template. **The engine has no
+dependency on any model.** That is the property worth protecting and it is
+intact.
+
+What is honestly lost is the part that makes the numbers usable by the person
+they are for: plain language, in their language, spoken aloud. Calling that
+"optional" would be a technically true sentence hiding a false impression.
+
+The mitigation is structural rather than aspirational: `narrate.py` talks to one
+function, `gemini.generate`, and the guard that enforces every figure sits above
+it. Replacing the model is an afternoon's work -- which is exactly what was just
+done, in the other direction, without touching `guard.py`.
 
 ## Indicator 9 in detail
 

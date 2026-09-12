@@ -28,29 +28,68 @@ def make_image() -> bytes:
 
 
 class StubResponse:
-    def __init__(self, data, stop_reason="end_turn"):
+    """Shaped like what gemini.generate returns, which is all the code sees."""
+
+    def __init__(self, data, stop_reason=None, model="gemini-2.5-pro"):
         text = data if isinstance(data, str) else json.dumps(data)
         self.content = [SimpleNamespace(type="text", text=text)]
         self.stop_reason = stop_reason
-        self.model = "claude-opus-5"
+        self.model = model
         self.usage = SimpleNamespace(
-            input_tokens=800, output_tokens=200,
+            input_tokens=100, output_tokens=40,
             cache_read_input_tokens=0, cache_creation_input_tokens=0,
         )
 
 
 class StubClient:
-    def __init__(self, responses):
-        self._responses = list(responses)
+    """Kept as a shim so each test still reads as "queue a response".
+
+    Installing it patches gemini.generate, because the code now calls that
+    module function directly instead of taking an injected SDK client.
+    """
+
+    _monkeypatch = None
+
+    def __init__(self, response):
         self.calls = []
-        outer = self
+        if isinstance(response, list):
+            queue = list(response)
+            take = lambda: queue.pop(0)
+        else:
+            take = lambda: response
 
-        class Messages:
-            def create(self, **kwargs):
-                outer.calls.append(kwargs)
-                return outer._responses.pop(0)
+        def generate(**kwargs):
+            self.calls.append(kwargs)
+            return take()
 
-        self.beta = SimpleNamespace(messages=Messages())
+        from app.ai import gemini
+        from app.config import get_settings
+
+        get_settings.cache_clear()
+        StubClient._monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        StubClient._monkeypatch.setattr(gemini, "generate", generate)
+
+
+class RaisingClient(StubClient):
+    def __init__(self, exc):
+        self.calls = []
+
+        def generate(**kwargs):
+            raise exc
+
+        from app.ai import gemini
+        from app.config import get_settings
+
+        get_settings.cache_clear()
+        StubClient._monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        StubClient._monkeypatch.setattr(gemini, "generate", generate)
+
+
+@pytest.fixture(autouse=True)
+def _wire_stub_clients(monkeypatch):
+    StubClient._monkeypatch = monkeypatch
+    yield
+    StubClient._monkeypatch = None
 
 
 GOOD = {
@@ -83,7 +122,7 @@ class TestIdentification:
     def test_returns_the_name_it_was_given(self):
         client = StubClient([StubResponse(GOOD)])
         result = identify_open_ended(
-            make_image(), crop_label="Cotton", client=client
+            make_image(), crop_label="Cotton"
         )
         assert result.provisional_name == "Cotton leaf curl virus"
         assert result.confidence == pytest.approx(0.62)
@@ -91,7 +130,7 @@ class TestIdentification:
     def test_never_returns_a_disease_code(self):
         client = StubClient([StubResponse(GOOD)])
         result = identify_open_ended(
-            make_image(), crop_label="Cotton", client=client
+            make_image(), crop_label="Cotton"
         )
         assert result.disease_code is None
         assert not result.identified
@@ -99,7 +138,7 @@ class TestIdentification:
     def test_says_plainly_that_the_name_is_unchecked(self):
         client = StubClient([StubResponse(GOOD)])
         result = identify_open_ended(
-            make_image(), crop_label="Cotton", client=client
+            make_image(), crop_label="Cotton"
         )
         joined = " ".join(result.notes).lower()
         assert "not been checked" in joined or "has not been checked" in joined
@@ -108,7 +147,7 @@ class TestIdentification:
     def test_says_no_treatment_is_given(self):
         client = StubClient([StubResponse(GOOD)])
         result = identify_open_ended(
-            make_image(), crop_label="Cotton", client=client
+            make_image(), crop_label="Cotton"
         )
         assert any("no treatment is given" in n.lower() for n in result.notes)
 
@@ -116,7 +155,7 @@ class TestIdentification:
     def test_a_non_answer_is_not_dressed_up_as_a_name(self, name):
         client = StubClient([StubResponse({**GOOD, "disease_name": name})])
         result = identify_open_ended(
-            make_image(), crop_label="Cotton", client=client
+            make_image(), crop_label="Cotton"
         )
         assert result.provisional_name is None
         assert result.confidence == 0.0
@@ -126,21 +165,21 @@ class TestIdentification:
         # paragraph is not a name.
         client = StubClient([StubResponse({**GOOD, "disease_name": "x" * 400})])
         result = identify_open_ended(
-            make_image(), crop_label="Cotton", client=client
+            make_image(), crop_label="Cotton"
         )
         assert len(result.provisional_name) == MAX_NAME_CHARS
 
     def test_a_refusal_is_not_an_identification(self):
         client = StubClient([StubResponse(GOOD, stop_reason="refusal")])
         result = identify_open_ended(
-            make_image(), crop_label="Cotton", client=client
+            make_image(), crop_label="Cotton"
         )
         assert result.provisional_name is None
 
     def test_unreadable_output_is_not_an_identification(self):
         client = StubClient([StubResponse("not json at all")])
         result = identify_open_ended(
-            make_image(), crop_label="Cotton", client=client
+            make_image(), crop_label="Cotton"
         )
         assert result.provisional_name is None
 
@@ -148,15 +187,15 @@ class TestIdentification:
         # A call that is not recorded is spend the cap cannot see.
         client = StubClient([StubResponse(GOOD)])
         result = identify_open_ended(
-            make_image(), crop_label="Cotton", client=client
+            make_image(), crop_label="Cotton"
         )
         assert result.usage is not None
-        assert result.model == "claude-opus-5"
+        assert result.model == "gemini-2.5-pro"
 
     def test_a_refused_call_still_reports_its_usage(self):
         client = StubClient([StubResponse(GOOD, stop_reason="refusal")])
         result = identify_open_ended(
-            make_image(), crop_label="Cotton", client=client
+            make_image(), crop_label="Cotton"
         )
         assert result.usage is not None
 
@@ -219,12 +258,12 @@ class TestTheDiagnosisCarriesNoAdvice:
     def test_the_route_is_distinct_from_inconclusive_and_from_verified(self):
         # Collapsing it into inconclusive would make the audit log read as
         # though nothing happened, on a call that cost money and named a
-        # disease. Collapsing it into claude_vision would imply the answer was
+        # disease. Collapsing it into cloud_vision would imply the answer was
         # checked against a list.
         diagnosis = self._provisional()
         assert diagnosis.resolved_by == "provisional"
         assert diagnosis.resolved_by != Route.INCONCLUSIVE.value
-        assert diagnosis.resolved_by != Route.CLAUDE_VISION.value
+        assert diagnosis.resolved_by != Route.CLOUD_VISION.value
 
     def test_the_name_reaches_the_client(self):
         assert self._provisional().to_dict()["provisional_name"] == (
