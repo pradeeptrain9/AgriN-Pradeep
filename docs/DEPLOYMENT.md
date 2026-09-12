@@ -106,6 +106,26 @@ each must re-pin — a manual, trust-establishing step by design.
 Set `NODE_ID` and `NODE_COUNTRY` in `.env` before first start; changing them
 afterwards creates a second identity rather than renaming the first.
 
+### State nodes
+
+A node run by a state rather than a country sets `NODE_REGION` to its ISO
+3166-2 code:
+
+```
+NODE_ID=node-in-mh
+NODE_COUNTRY=IN
+NODE_REGION=IN-MH
+```
+
+Without it two state nodes are indistinguishable in a discovery document —
+both say `IN` — and a peer cannot tell whose district statistics it pulled or
+which state trained the model it is about to adopt. District names are not
+unique across India either: there is a Bilaspur in three states, so the region
+travels **inside** the signed aggregate payload, not alongside it.
+
+A national node leaves `NODE_REGION` empty and the field is omitted rather than
+published blank.
+
 ## 3. Credentials
 
 | variable | needed for | without it |

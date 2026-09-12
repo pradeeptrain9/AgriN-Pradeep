@@ -55,6 +55,9 @@ async def node_descriptor(db: AsyncSession = Depends(get_db)) -> dict:
         "spec_version": SPEC_VERSION,
         "node_id": identity["node_id"],
         "country": identity["country"],
+        # Absent on a national node, so a peer reads "no region" rather than a
+        # region it has to guess the meaning of.
+        **({"region": settings.node_region} if settings.node_region else {}),
         "public_key": identity["public_key"],
         "algorithm": "ed25519",
         "capabilities": [
@@ -170,11 +173,18 @@ async def aggregates(
     observations = await _collect(db, indicator)
     result = aggregate(observations, k=effective_k)
 
+    settings = get_settings()
     payload = {
         "spec_version": SPEC_VERSION,
         "indicator": indicator,
         "unit": vocab.INDICATORS[indicator]["unit"],
         "generated_at": _now(),
+        # District names are not unique across India -- there is a Bilaspur in
+        # three states. A signed cell that says only "Bilaspur" cannot be put on
+        # a map by the peer that receives it, so the publishing region travels
+        # inside the signature with it.
+        "country": settings.node_country,
+        **({"region": settings.node_region} if settings.node_region else {}),
         **result.to_dict(),
     }
 

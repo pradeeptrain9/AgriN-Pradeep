@@ -114,3 +114,43 @@ class TestGrouping:
         result = aggregate(a + b, k=5)
         assert result.cells == []
         assert result.suppressed_cells == 2
+
+
+class TestPublishingRegion:
+    """Whose district is this?
+
+    The network the project is for is Indian states exchanging models and
+    statistics. Two state nodes both declaring country "IN" are the same node
+    as far as a discovery document is concerned, and district names are not
+    unique across India -- there is a Bilaspur in three states. A signed cell
+    labelled only "Bilaspur" cannot be placed on a map by the peer that
+    receives it.
+    """
+
+    def test_the_region_travels_inside_the_signature(self):
+        import inspect
+
+        from app.api import federation
+
+        source = inspect.getsource(federation.aggregates)
+        assert '"country": settings.node_country' in source
+        region_line = '"region": settings.node_region'
+        assert region_line in source
+        # Inside the payload dict, which is what gets sealed -- not added to
+        # the envelope afterwards, where it would not be covered by the
+        # signature and a peer could rewrite it.
+        assert source.index(region_line) < source.index("envelope = seal(")
+
+    def test_a_national_node_omits_the_field_rather_than_sending_an_empty_one(self):
+        import inspect
+
+        from app.api import federation
+
+        for func in (federation.aggregates, federation.node_descriptor):
+            source = inspect.getsource(func)
+            assert "if settings.node_region else {}" in source
+
+    def test_the_setting_defaults_to_empty(self):
+        from app.config import Settings
+
+        assert Settings().node_region == ""

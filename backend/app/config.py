@@ -9,6 +9,13 @@ class Settings(BaseSettings):
     agrin_env: str = "dev"
     node_id: str = "node-in"
     node_country: str = "IN"
+    # ISO 3166-2 for a node run by a state rather than a country -- "IN-MH" for
+    # Maharashtra. The network this is for is Indian states sharing models and
+    # statistics with each other, and two state nodes both declaring country
+    # "IN" are indistinguishable in a discovery document: a peer cannot tell
+    # whose district figures it just pulled, or which of them trained the model
+    # it is about to adopt. Empty means the node speaks for the whole country.
+    node_region: str = ""
     secret_key: str = "dev-only-insecure-key"
 
     database_url: str = "postgresql+asyncpg://agrin:agrin@localhost:5433/agrin"
