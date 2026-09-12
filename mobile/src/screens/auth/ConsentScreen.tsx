@@ -25,7 +25,7 @@ import { currentNodeUrl, nodeLabel } from '../../services/node';
 import { useAuthStore } from '../../store/authSlice';
 
 const KEPT_HERE = [
-  'The shape of your field, as you walked it',
+  'The shape of your field, as you walked it or marked it on the map',
   'What you are growing and when you sowed it',
   'Soil information you enter from your Soil Health Card',
   'Photographs of leaves you ask us to check',

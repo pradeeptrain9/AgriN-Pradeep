@@ -69,6 +69,22 @@ export const FIELD_LIMITS = {
   autoCloseMinPerimeterM: 60,
 };
 
+/**
+ * Drawing a boundary has the same area limits as walking one and a different
+ * minimum point count, on purpose.
+ *
+ * Six points is right for a walk: the GPS emits them continuously and six is
+ * barely more than standing still. It is wrong for tapping, where a rectangular
+ * plot -- most plots -- is four corners and nothing more. Demanding six taps
+ * would make a farmer invent two phantom corners along a straight bund, which
+ * is worse data than the four real ones.
+ */
+export const DRAW_LIMITS = {
+  minAreaHa: FIELD_LIMITS.minAreaHa,
+  maxAreaHa: FIELD_LIMITS.maxAreaHa,
+  minPoints: 3,
+};
+
 export const DISEASE_MODEL = {
   asset: 'disease_v1.tflite',
   inputSize: 224,

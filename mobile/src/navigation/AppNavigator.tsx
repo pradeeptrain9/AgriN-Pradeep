@@ -10,6 +10,7 @@ import { OtpScreen } from '../screens/auth/OtpScreen';
 import { PhoneScreen } from '../screens/auth/PhoneScreen';
 import { ScanScreen } from '../screens/disease/ScanScreen';
 import { CropScreen } from '../screens/fields/CropScreen';
+import { DrawFieldScreen } from '../screens/fields/DrawFieldScreen';
 import { FieldDetailScreen } from '../screens/fields/FieldDetailScreen';
 import { FieldListScreen } from '../screens/fields/FieldListScreen';
 import { CropSuggestionScreen } from '../screens/fields/CropSuggestionScreen';
@@ -111,7 +112,10 @@ export const AppNavigator: React.FC = () => {
               options={{ title: 'What to grow' }}
             />
             <Stack.Screen
-              name="MapField" component={MapFieldScreen} options={{ title: 'Map a field' }}
+              name="MapField" component={MapFieldScreen} options={{ title: 'Walk a field' }}
+            />
+            <Stack.Screen
+              name="DrawField" component={DrawFieldScreen} options={{ title: 'Draw a field' }}
             />
             <Stack.Screen
               name="FieldDetail" component={FieldDetailScreen} options={{ title: 'Field' }}

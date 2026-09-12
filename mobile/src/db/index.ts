@@ -16,7 +16,7 @@ import { open, type DB } from '@op-engineering/op-sqlite';
  * the bulk writes here should move to `executeBatch` off the JS thread.
  */
 
-import type { Advisory, Diagnosis, Field } from '../types';
+import type { Advisory, Diagnosis, Field, FieldSource } from '../types';
 
 /** A field as held on the phone: `pending` means it has not reached a node yet. */
 export interface CachedField extends Field {
@@ -34,6 +34,11 @@ CREATE TABLE IF NOT EXISTS fields (
   geometry TEXT NOT NULL,
   crop TEXT, soil TEXT,
   created_at TEXT,
+  -- 'walked' or 'drawn'. A walked boundary is a survey, a drawn one an
+  -- estimate over a basemap, and the advisory multiplies the area into every
+  -- figure it gives. Defaulted rather than nullable so a field that predates
+  -- drawing reads as what it is.
+  source TEXT NOT NULL DEFAULT 'walked',
   synced_at INTEGER
 );
 
@@ -89,6 +94,23 @@ CREATE TABLE IF NOT EXISTS outbox (
 CREATE INDEX IF NOT EXISTS outbox_order_idx ON outbox (created_at);
 `;
 
+/**
+ * Columns added to a table that already exists on a farmer's phone.
+ *
+ * The schema above is all CREATE TABLE IF NOT EXISTS, which is enough for a new
+ * table and does nothing at all for a new column: an app updated over an
+ * existing install keeps the old `fields` table and every write naming the new
+ * column fails. SQLite has no ADD COLUMN IF NOT EXISTS, so each is attempted
+ * and a duplicate-column error swallowed -- the only error this can raise.
+ *
+ * Not a migration framework. When this list grows past a handful, or an
+ * alteration needs to do more than add a defaulted column, it should become a
+ * numbered sequence recorded in a table, the way the node's already is.
+ */
+const ADDED_COLUMNS = [
+  "ALTER TABLE fields ADD COLUMN source TEXT NOT NULL DEFAULT 'walked'",
+];
+
 export const initDb = (): DB => {
   if (db) return db;
   db = open({ name: 'agrin.sqlite' });
@@ -97,6 +119,13 @@ export const initDb = (): DB => {
   for (const statement of SCHEMA.split(';')) {
     const trimmed = statement.trim();
     if (trimmed) db.executeSync(trimmed);
+  }
+  for (const alteration of ADDED_COLUMNS) {
+    try {
+      db.executeSync(alteration);
+    } catch {
+      // Already present. Any other failure surfaces on the first read.
+    }
   }
   return db;
 };
@@ -111,12 +140,13 @@ export const saveFields = (fields: Field[]): void => {
     for (const field of fields) {
       c.executeSync(
         `INSERT INTO fields (id, name, area_ha, centroid_lon, centroid_lat, geometry,
-           crop, soil, created_at, synced_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           crop, soil, created_at, source, synced_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name, area_ha = excluded.area_ha,
            centroid_lon = excluded.centroid_lon, centroid_lat = excluded.centroid_lat,
            geometry = excluded.geometry, crop = excluded.crop, soil = excluded.soil,
+           source = excluded.source,
            synced_at = excluded.synced_at`,
         [
           field.id, field.name, field.area_ha,
@@ -124,7 +154,11 @@ export const saveFields = (fields: Field[]): void => {
           JSON.stringify(field.geometry),
           field.crop ? JSON.stringify(field.crop) : null,
           field.soil ? JSON.stringify(field.soil) : null,
-          field.created_at ?? null, Date.now(),
+          field.created_at ?? null,
+          // A node that has not been updated omits it; that node only has
+          // walked fields, so saying so is accurate rather than a guess.
+          field.source ?? 'walked',
+          Date.now(),
         ],
       );
     }
@@ -155,15 +189,17 @@ export const insertLocalField = (field: {
   area_ha: number;
   centroid: [number, number];
   geometry: unknown;
+  source?: FieldSource;
 }): void => {
   conn().executeSync(
     `INSERT INTO fields (id, name, area_ha, centroid_lon, centroid_lat, geometry,
-       created_at, synced_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+       created_at, source, synced_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     [
       field.id, field.name, field.area_ha,
       field.centroid[0], field.centroid[1],
       JSON.stringify(field.geometry), new Date().toISOString(),
+      field.source ?? 'walked',
     ],
   );
 };
@@ -225,6 +261,7 @@ export const loadFields = (): CachedField[] => {
     crop: parse(row.crop),
     soil: parse(row.soil),
     created_at: row.created_at,
+    source: (row.source as FieldSource) ?? 'walked',
     pending: row.synced_at === null || row.synced_at === undefined,
   }));
 };

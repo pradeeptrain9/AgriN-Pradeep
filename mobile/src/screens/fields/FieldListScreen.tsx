@@ -71,6 +71,10 @@ export const FieldListScreen: React.FC<{ navigation: any }> = ({ navigation }) =
           </View>
           <Text style={styles.cardMeta}>
             {item.area_ha.toFixed(2)} ha
+            {/* The area is a multiplier on every fertiliser and water figure
+                the advisory gives, so how it was obtained belongs next to it,
+                not on a details screen nobody opens. */}
+            {item.source === 'drawn' ? ' (drawn)' : ''}
             {item.crop ? ` · ${item.crop.crop_code.replace(/_/g, ' ')}` : ' · no crop set'}
           </Text>
           {irrigateNow ? <Text style={styles.urgent}>Needs water today</Text> : null}
@@ -113,7 +117,8 @@ export const FieldListScreen: React.FC<{ navigation: any }> = ({ navigation }) =
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>No fields yet</Text>
             <Text style={styles.emptyBody}>
-              Walk around the edge of a field and AgriN will map it for you.
+              Walk around the edge of a field and AgriN will map it for you, or
+              mark its corners on the map if you cannot get there.
               {'\n\n'}
               You do not have to map anything to check a leaf for disease.
             </Text>
@@ -122,10 +127,23 @@ export const FieldListScreen: React.FC<{ navigation: any }> = ({ navigation }) =
       />
 
       <View style={styles.footer}>
-        <Button label="Map a new field" icon="+" onPress={() => navigation.navigate('MapField')} />
-        {/* Checking a leaf needs nothing but the leaf. Requiring a mapped field
-            first put a boundary walk between a farmer holding a diseased plant
-            and the one answer the phone can give them on the spot, offline. */}
+        <Button
+          label="Walk a new field"
+          icon="+"
+          onPress={() => navigation.navigate('MapField')}
+        />
+        {/* Deliberately second and deliberately quieter. Walking produces a
+            boundary someone stood on; drawing produces one someone believes
+            in. Both are offered because walking is often impossible -- leased
+            land, a plot across a canal, a block too large to walk today -- but
+            the better one leads. */}
+        <View style={styles.footerSpacer} />
+        <Button
+          label="Draw it on the map instead"
+          icon="✎"
+          variant="secondary"
+          onPress={() => navigation.navigate('DrawField')}
+        />
         <View style={styles.footerSpacer} />
         <Button
           label="Check a leaf for disease"

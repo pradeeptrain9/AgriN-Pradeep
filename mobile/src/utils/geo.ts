@@ -47,7 +47,7 @@ export const distanceToStart = (coords: Coordinate[]): number => {
  */
 export const trackToPolygon = (
   coords: Coordinate[],
-  toleranceDegrees = 0.00002, // ~2 m
+  toleranceDegrees: number = 0.00002, // ~2 m
 ): GeoJsonPolygon | null => {
   if (coords.length < 3) return null;
 
@@ -120,15 +120,24 @@ export interface BoundaryValidation {
   problem?: string;
 }
 
-/** Mirrors the backend's rejection rules so the failure happens before upload. */
+/**
+ * Mirrors the backend's rejection rules so the failure happens before upload.
+ *
+ * `toleranceDegrees` exists for drawn boundaries. Thinning is right for a GPS
+ * track, where most vertices are jitter nobody chose; it is wrong for tapped
+ * corners, where every vertex was placed deliberately and the farmer is
+ * checking the shape on screen against the field they can see. Passing 0 keeps
+ * what they tapped.
+ */
 export const validateBoundary = (
   coords: Coordinate[],
   limits: { minAreaHa: number; maxAreaHa: number; minPoints: number },
+  toleranceDegrees?: number,
 ): BoundaryValidation => {
   if (coords.length < limits.minPoints) {
     return { valid: false, areaHa: 0, problem: 'too_few_points' };
   }
-  const polygon = trackToPolygon(coords);
+  const polygon = trackToPolygon(coords, toleranceDegrees);
   if (!polygon) return { valid: false, areaHa: 0, problem: 'not_a_shape' };
 
   // Self-intersection is checked BEFORE area on purpose: the shoelace area of a

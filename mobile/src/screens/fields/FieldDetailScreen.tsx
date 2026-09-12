@@ -107,7 +107,15 @@ export const FieldDetailScreen: React.FC<{ route: any; navigation: any }> = ({
     setBusy(true);
     try {
       await refreshField(fieldId);
-      await load();
+      // The weather card has to be reloaded here too, not just the advisory.
+      // This is what the ingest was for: on a field the node has never seen,
+      // the card had already fetched an empty answer and kept it, so after a
+      // successful update it still read "No weather for this field yet. Tap
+      // Update from satellite" -- directly above a WATER card computing "no
+      // irrigation needed in the next 10 days" from the very weather it
+      // claimed did not exist, and telling the farmer to do the thing they
+      // had just done.
+      await Promise.all([load(), refreshWeather()]);
     } finally {
       setBusy(false);
     }
@@ -186,18 +194,29 @@ export const FieldDetailScreen: React.FC<{ route: any; navigation: any }> = ({
       ) : null}
 
       {field?.geometry ? (
-        <View style={styles.mapCard}>
-          <FieldMapView
-            bounds={boundsFor(field.geometry) ?? undefined}
-            attributionNote={false}
-          >
-            <FieldPolygon
-              id={field.id}
-              geometry={field.geometry}
-              severity={advisory.health?.severity}
-            />
-          </FieldMapView>
-        </View>
+        <>
+          <View style={styles.mapCard}>
+            <FieldMapView
+              bounds={boundsFor(field.geometry) ?? undefined}
+              attributionNote={false}
+            >
+              <FieldPolygon
+                id={field.id}
+                geometry={field.geometry}
+                severity={advisory.health?.severity}
+              />
+            </FieldMapView>
+          </View>
+          {/* Directly under the shape: a farmer looking at a boundary that does
+              not match their field needs to know whether it came from their own
+              feet or their own memory. Every kilogram and millimetre below is
+              per hectare, multiplied by this area. */}
+          {field.source === 'drawn' ? (
+            <Text style={styles.drawnNote}>
+              Marked on the map, not walked. Walk the edge to correct the size.
+            </Text>
+          ) : null}
+        </>
       ) : null}
 
       {narration ? (
@@ -362,6 +381,10 @@ const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: 'center', padding: spacing.lg },
   mapCard: {
     height: 200, borderRadius: radius.md, overflow: 'hidden', marginBottom: spacing.md,
+  },
+  drawnNote: {
+    ...type.caption, color: colors.textMuted,
+    marginTop: -spacing.sm, marginBottom: spacing.md,
   },
   summaryCard: {
     backgroundColor: colors.primary, borderRadius: radius.md, padding: spacing.md,

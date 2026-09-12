@@ -23,10 +23,13 @@ interface Props {
   zoom?: number;
   children?: React.ReactNode;
   attributionNote?: boolean;
+  /** Called with [longitude, latitude] when the farmer taps the map. */
+  onPress?: (position: [number, number]) => void;
 }
 
 export const FieldMapView: React.FC<Props> = ({
-  centerCoordinate, bounds, followUser = false, zoom, children, attributionNote = true,
+  centerCoordinate, bounds, followUser = false, zoom, children,
+  attributionNote = true, onPress,
 }) => {
   const cameraRef = useRef<any>(null);
   const tier = useDeviceTier();
@@ -36,6 +39,19 @@ export const FieldMapView: React.FC<Props> = ({
       <MapView
         style={styles.map}
         mapStyle={rasterStyle()}
+        // MapLibre hands back a GeoJSON Feature. Unwrapping it here keeps every
+        // screen dealing in plain [lon, lat] positions, which is what the geo
+        // utilities and the GeoJSON ring both already speak.
+        onPress={
+          onPress
+            ? (feature: any) => {
+                const position = feature?.geometry?.coordinates;
+                if (Array.isArray(position) && position.length >= 2) {
+                  onPress([Number(position[0]), Number(position[1])]);
+                }
+              }
+            : undefined
+        }
         logoEnabled={false}
         attributionEnabled={false}
         rotateEnabled={false}

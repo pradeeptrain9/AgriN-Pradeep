@@ -11,7 +11,8 @@ import axios, { AxiosError } from 'axios';
 import { useAuthStore } from '../store/authSlice';
 import { currentNodeUrl } from './node';
 import type {
-  Advisory, CropSuggestions, Diagnosis, Field, FieldWeather, GeoJsonPolygon, Narration,
+  Advisory, CropSuggestions, Diagnosis, Field, FieldSource, FieldWeather, GeoJsonPolygon,
+  Narration,
 } from '../types';
 
 export const api = axios.create({
@@ -65,8 +66,12 @@ export const listFields = async (): Promise<Field[]> => {
   return data;
 };
 
-export const createField = async (name: string, geometry: GeoJsonPolygon): Promise<Field> => {
-  const { data } = await api.post('/fields', { name, geometry });
+export const createField = async (
+  name: string,
+  geometry: GeoJsonPolygon,
+  source: FieldSource = 'walked',
+): Promise<Field> => {
+  const { data } = await api.post('/fields', { name, geometry, source });
   return data;
 };
 

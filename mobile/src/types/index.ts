@@ -10,6 +10,14 @@ export interface GeoJsonPolygon {
   coordinates: number[][][];
 }
 
+/**
+ * `source` is how the boundary was obtained, and it is not cosmetic. A walked
+ * boundary is a survey; a drawn one is an estimate over a satellite basemap.
+ * Every fertiliser and water figure the advisory produces is per hectare, so
+ * the area multiplies all of them -- a drawn field must never be read back as
+ * a surveyed one. Absent means walked: that is what every field created before
+ * drawing existed actually is.
+ */
 export interface Field {
   id: string;
   name: string;
@@ -17,9 +25,12 @@ export interface Field {
   centroid: [number, number];
   geometry: GeoJsonPolygon;
   created_at: string;
+  source?: FieldSource;
   crop?: CropCycle | null;
   soil?: SoilProfile | null;
 }
+
+export type FieldSource = 'walked' | 'drawn';
 
 export interface CropCycle {
   id?: string;

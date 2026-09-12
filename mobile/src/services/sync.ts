@@ -25,7 +25,13 @@ export interface SyncResult {
 const replay = async (item: OutboxItem): Promise<void> => {
   switch (item.kind) {
     case 'create_field': {
-      const field = await createField(item.payload.name, item.payload.geometry);
+      const field = await createField(
+        item.payload.name,
+        item.payload.geometry,
+        // Queued before this column existed, or queued by the walk path:
+        // either way the boundary was walked.
+        item.payload.source ?? 'walked',
+      );
 
       // Remap BEFORE saving the server's copy. The other order inserts a row
       // under the new id, and the remap's UPDATE then collides with it on the

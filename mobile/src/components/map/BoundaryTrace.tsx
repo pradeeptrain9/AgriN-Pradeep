@@ -1,14 +1,21 @@
 /**
- * Live boundary trace while the farmer walks.
+ * Live boundary trace, for both ways a field gets its edges.
  *
- * Three things are drawn, in the order they matter to someone looking at a
- * phone in sunlight: the path walked so far, a marker on the starting corner,
- * and -- once they are close enough to finish -- the line that would close the
- * loop. Seeing the closing line is what tells a farmer they have walked far
+ * Walking: three things are drawn, in the order they matter to someone looking
+ * at a phone in sunlight -- the path walked so far, a marker on the starting
+ * corner, and, once they are close enough to finish, the line that would close
+ * the loop. Seeing the closing line is what tells a farmer they have walked far
  * enough, without reading a number.
+ *
+ * Drawing: the same trace, plus `vertices` so every tapped corner is visible
+ * and `closed` so the shape reads as an enclosed field rather than a path. A
+ * walked point arrives from the GPS and cannot be aimed at; a drawn one was
+ * placed deliberately and has to be visible to be corrected.
  */
 
-import { CircleLayer, LineLayer, ShapeSource } from '@maplibre/maplibre-react-native';
+import {
+  CircleLayer, FillLayer, LineLayer, ShapeSource,
+} from '@maplibre/maplibre-react-native';
 import React, { useMemo } from 'react';
 
 import { colors } from '../../constants/theme';
@@ -17,9 +24,15 @@ import type { Coordinate } from '../../types';
 interface Props {
   coordinates: Coordinate[];
   canClose: boolean;
+  /** Mark every point, not just the first. For tapped corners. */
+  vertices?: boolean;
+  /** Draw the ring joined up and shaded, rather than an open path. */
+  closed?: boolean;
 }
 
-export const BoundaryTrace: React.FC<Props> = ({ coordinates, canClose }) => {
+export const BoundaryTrace: React.FC<Props> = ({
+  coordinates, canClose, vertices = false, closed = false,
+}) => {
   const positions = useMemo(
     () => coordinates.map((c) => [c.longitude, c.latitude]),
     [coordinates],
@@ -33,7 +46,12 @@ export const BoundaryTrace: React.FC<Props> = ({ coordinates, canClose }) => {
   const walked = {
     type: 'Feature' as const,
     properties: {},
-    geometry: { type: 'LineString' as const, coordinates: positions },
+    geometry: {
+      type: 'LineString' as const,
+      // A drawn boundary is a closed ring from the moment it has three
+      // corners; a walked one is an open path until the farmer gets back.
+      coordinates: closed && positions.length >= 3 ? [...positions, start] : positions,
+    },
   };
 
   const closing = {
@@ -73,6 +91,49 @@ export const BoundaryTrace: React.FC<Props> = ({ coordinates, canClose }) => {
               lineWidth: 3,
               lineDasharray: [2, 2],
               lineOpacity: 0.8,
+            }}
+          />
+        </ShapeSource>
+      ) : null}
+
+      {closed && positions.length >= 3 ? (
+        <ShapeSource
+          id="boundary-ring"
+          shape={{
+            type: 'Feature',
+            properties: {},
+            geometry: { type: 'Polygon', coordinates: [[...positions, start]] },
+          }}
+        >
+          <FillLayer
+            id="boundary-ring-fill"
+            // Light enough that the satellite basemap stays readable through
+            // it: a farmer is matching this shape against the field they can
+            // see, and a solid fill hides the thing being matched.
+            style={{ fillColor: colors.primary, fillOpacity: 0.22 }}
+          />
+        </ShapeSource>
+      ) : null}
+
+      {vertices && positions.length > 0 ? (
+        <ShapeSource
+          id="boundary-vertices"
+          shape={{
+            type: 'FeatureCollection',
+            features: positions.map((position) => ({
+              type: 'Feature' as const,
+              properties: {},
+              geometry: { type: 'Point' as const, coordinates: position },
+            })),
+          }}
+        >
+          <CircleLayer
+            id="boundary-vertex-dots"
+            style={{
+              circleRadius: 7,
+              circleColor: colors.onPrimary,
+              circleStrokeWidth: 3,
+              circleStrokeColor: colors.primary,
             }}
           />
         </ShapeSource>
