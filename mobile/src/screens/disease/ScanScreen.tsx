@@ -10,7 +10,8 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  Alert, Image, Pressable, ScrollView, StyleSheet, Text, View,
+  Alert, Image, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet,
+  Text, View,
 } from 'react-native';
 import {
   launchCamera, launchImageLibrary, type PhotoQuality,
@@ -76,7 +77,39 @@ export const ScanScreen: React.FC<{ route: any }> = ({ route }) => {
   const [busy, setBusy] = useState(false);
   const [queued, setQueued] = useState(false);
 
+  /**
+   * The app declares android.permission.CAMERA, and image-picker requires the
+   * app to have obtained it before launchCamera -- it does not ask on your
+   * behalf. Nothing requested it, so the camera button did nothing at all on a
+   * fresh install.
+   */
+  const ensureCamera = async (): Promise<boolean> => {
+    if (Platform.OS !== 'android') return true;
+    const permission = PermissionsAndroid.PERMISSIONS.CAMERA;
+    if (!permission) return true;
+    if (await PermissionsAndroid.check(permission)) return true;
+
+    const granted = await PermissionsAndroid.request(permission, {
+      title: 'Use the camera',
+      message: 'AgriN needs the camera to photograph the leaf you want checked.',
+      buttonPositive: 'Allow',
+      buttonNegative: 'Not now',
+    });
+    if (granted === PermissionsAndroid.RESULTS.GRANTED) return true;
+
+    Alert.alert(
+      'Camera not allowed',
+      granted === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN
+        ? 'Camera access was turned off for AgriN. Turn it on in Settings, or '
+          + 'use Choose to pick a photo you have already taken.'
+        : 'You can still use Choose to pick a photo you have already taken.',
+    );
+    return false;
+  };
+
   const pick = async (fromCamera: boolean) => {
+    if (fromCamera && !(await ensureCamera())) return;
+
     const options = {
       mediaType: 'photo' as const,
       maxWidth: tier.captureMaxPx,
@@ -84,15 +117,36 @@ export const ScanScreen: React.FC<{ route: any }> = ({ route }) => {
       quality: tier.captureQuality as PhotoQuality,
       includeExtra: false,
     };
+
     const result = fromCamera
       ? await launchCamera(options)
       : await launchImageLibrary(options);
-    const uri = result.assets?.[0]?.uri;
-    if (uri) {
-      setImageUri(uri);
-      setDiagnosis(null);
-      setQueued(false);
+
+    // Backing out is not a failure; say nothing.
+    if (result.didCancel) return;
+
+    // Everything else was silently discarded before, so a camera that could not
+    // open was indistinguishable from a button that did nothing.
+    if (result.errorCode) {
+      Alert.alert(
+        fromCamera ? 'Could not open the camera' : 'Could not open your photos',
+        result.errorMessage
+          || (result.errorCode === 'camera_unavailable'
+            ? 'This device did not provide a camera.'
+            : 'Please try again, or use the other option.'),
+      );
+      return;
     }
+
+    const uri = result.assets?.[0]?.uri;
+    if (!uri) {
+      Alert.alert('No photo', 'Nothing came back from that. Please try again.');
+      return;
+    }
+
+    setImageUri(uri);
+    setDiagnosis(null);
+    setQueued(false);
   };
 
   const analyse = async () => {
@@ -158,7 +212,11 @@ export const ScanScreen: React.FC<{ route: any }> = ({ route }) => {
           </Text>
         ) : null}
 
-        {crops.map((crop) => (
+        {/* Only crops with a disease taxonomy. Offering the others guaranteed
+            an inconclusive answer -- after the farmer had taken the photo and
+            waited for it -- which reads as the app being broken rather than as
+            the honest "this crop is not covered yet". */}
+        {crops.filter((c) => c.diagnosable !== false).map((crop) => (
           <Pressable
             key={crop.code}
             onPress={() => setCropCode(crop.code)}
@@ -169,6 +227,17 @@ export const ScanScreen: React.FC<{ route: any }> = ({ route }) => {
             <Text style={styles.cropOptionText}>{crop.label}</Text>
           </Pressable>
         ))}
+
+        {crops.some((c) => c.diagnosable === false) ? (
+          <Text style={styles.cropHint}>
+            {'\n'}
+            Leaf checking is not available yet for{' '}
+            {crops.filter((c) => c.diagnosable === false)
+                  .map((c) => c.label).join(', ')}
+            . Those crops have no disease list on this node, so a photo could
+            only be guessed at. Ask your extension officer instead.
+          </Text>
+        ) : null}
       </ScrollView>
     );
   }
