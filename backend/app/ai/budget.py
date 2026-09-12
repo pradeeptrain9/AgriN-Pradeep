@@ -57,6 +57,19 @@ RATES: dict[str, Rate] = {
     "gemini-2.5-flash": Rate(input_usd=0.30, output_usd=2.50),
     "gemini-2.5-pro": Rate(input_usd=2.50, output_usd=15.00),
     "gemini-2.0-flash": Rate(input_usd=0.10, output_usd=0.40),
+
+    # UNVERIFIED. gemini-3.6-flash became the default because Google refused
+    # gemini-2.5-flash for new keys, and its published price has not been
+    # checked against this table. The figure below is a deliberate over-estimate
+    # -- priced at the 2.5 *Pro* rate -- for one reason: `price()` returns 0.0
+    # for a model it does not know, and a model that costs nothing can never
+    # reach llm_monthly_usd_cap. Over-pricing makes the cap bind early and
+    # overstates the bill; under-pricing removes the cap silently. Only one of
+    # those is recoverable.
+    #
+    # Replace with the real rate from
+    # https://ai.google.dev/gemini-api/docs/pricing and drop this comment.
+    "gemini-3.6-flash": Rate(input_usd=2.50, output_usd=15.00),
 }
 
 # Gemini reports the model it actually served as e.g. "gemini-2.5-flash-002".

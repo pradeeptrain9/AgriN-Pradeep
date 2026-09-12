@@ -301,3 +301,106 @@ class TestGeminiSchemaDialect:
         from app.ai.vision import _schema
 
         assert "disease_code" in sanitise_schema(_schema("rice"))["required"]
+
+
+class TestAWithdrawnModelCannotReportHealthy:
+    """`/ready` must not call a model `ok` that will 404 on first use.
+
+    gemini-2.5-flash was withdrawn for new API keys. Every narration fell back
+    to the deterministic template and every escalated photograph returned "not
+    identified" -- both correct degradations, both indistinguishable from an
+    outage -- while /ready reported cloud_diagnosis ok because a key was set.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_withdrawn_model_is_reported_with_googles_own_message(self):
+        from app.ai import gemini
+
+        class Withdrawn:
+            status_code = 404
+
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def get(self, *a, **k): return self
+            def json(self):
+                return {"error": {"message":
+                    "This model models/gemini-2.5-flash is no longer available "
+                    "to new users. Please update your code to use "
+                    "models/gemini-3.6-flash."}}
+
+        import httpx
+        original = httpx.AsyncClient
+        httpx.AsyncClient = lambda *a, **k: Withdrawn()
+        try:
+            problem = await gemini.model_unavailable("key", "gemini-2.5-flash")
+        finally:
+            httpx.AsyncClient = original
+
+        assert problem is not None
+        # The replacement model is the single most useful thing an operator can
+        # be told, so it must survive into the readiness output verbatim.
+        assert "gemini-3.6-flash" in problem
+        assert "404" in problem
+
+    @pytest.mark.asyncio
+    async def test_no_key_is_not_reported_as_a_withdrawn_model(self):
+        from app.ai import gemini
+
+        # A missing key already has its own check. Reporting it twice, once
+        # wrongly, sends an operator after the wrong fault.
+        assert await gemini.model_unavailable("", "gemini-3.6-flash") is None
+
+    @pytest.mark.asyncio
+    async def test_google_being_unreachable_is_not_a_misconfiguration(self):
+        import httpx
+
+        from app.ai import gemini
+
+        class Down:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def get(self, *a, **k): raise httpx.ConnectError("boom")
+
+        original = httpx.AsyncClient
+        httpx.AsyncClient = lambda *a, **k: Down()
+        try:
+            assert await gemini.model_unavailable("key", "gemini-3.6-flash") is None
+        finally:
+            httpx.AsyncClient = original
+
+    def test_the_probe_generates_nothing(self):
+        # /ready is unauthenticated. A check that spent tokens would let a
+        # stranger drain the monthly cap by polling it.
+        import inspect
+
+        from app.ai import gemini
+
+        source = inspect.getsource(gemini.model_unavailable)
+        assert "generateContent" not in source
+        assert ".get(" in source and ".post(" not in source
+
+
+class TestEveryConfiguredModelHasAPrice:
+    def test_the_defaults_are_priced(self):
+        from app.ai import budget
+        from app.config import Settings
+
+        # An unpriced model bills 0.00, which does not fail loudly -- it removes
+        # the monthly cap while reporting perfect thrift.
+        defaults = Settings()
+        for model in (defaults.gemini_narrate_model, defaults.gemini_vision_model):
+            assert budget.rate_for(model) is not None, f"{model} has no rate"
+
+    def test_a_served_version_suffix_still_prices(self):
+        from app.ai import budget
+        from app.config import Settings
+
+        served = Settings().gemini_narrate_model + "-002"
+        assert budget.rate_for(served) is not None
+
+    def test_readiness_refuses_to_call_an_unpriced_model_ok(self):
+        import pathlib
+
+        source = (pathlib.Path(__file__).resolve().parents[2]
+                  / "app" / "api" / "readiness.py").read_text()
+        assert "has no price in ai/budget.py" in source

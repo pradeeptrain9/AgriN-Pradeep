@@ -302,3 +302,48 @@ def json_from(response: GeminiResponse) -> dict | None:
             except json.JSONDecodeError:
                 continue
     return None
+
+
+async def model_unavailable(api_key: str, model: str) -> str | None:
+    """Ask Google whether this model will answer. None means it will.
+
+    Reads the model's metadata rather than generating anything, so it costs no
+    tokens and nothing from the budget. That matters because `/ready` is
+    unauthenticated: a check that spent money would turn the readiness endpoint
+    into a way for a stranger to drain a node's monthly cap.
+
+    This exists because the alternative failed in exactly the way `/ready` is
+    supposed to catch. `gemini-2.5-flash` was withdrawn for new API keys and
+    began returning 404. Every narration silently served the deterministic
+    template and every escalated photograph came back "not identified" -- both
+    honest degradations, and both identical to an outage from the outside --
+    while `/ready` reported cloud_diagnosis `ok`, because a key was present.
+    Present has never been the same as valid.
+
+    A transport failure returns None. Google being briefly unreachable is not a
+    misconfiguration of this node, and reporting it as one sends an operator
+    hunting for a fault that is not theirs.
+    """
+    if not api_key:
+        return None
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{BASE_URL}/{model}", params={"key": api_key}, timeout=15.0
+            )
+    except httpx.HTTPError:
+        return None
+
+    if response.status_code == 200:
+        return None
+
+    detail = ""
+    try:
+        detail = ((response.json() or {}).get("error") or {}).get("message", "")
+    except ValueError:
+        detail = response.text[:200]
+
+    # Google's 404 names the replacement model, which is the single most useful
+    # thing an operator can be told here, so it is passed through whole.
+    return f"{response.status_code}: {detail or 'no detail given'}"

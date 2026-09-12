@@ -27,8 +27,18 @@ class Settings(BaseSettings):
     # fallback model bought resilience rather than safety -- and resilience is
     # already covered by the template. See app/ai/gemini.py.
     gemini_api_key: str = ""
-    gemini_narrate_model: str = "gemini-2.5-flash"
-    gemini_vision_model: str = "gemini-2.5-pro"
+    # gemini-2.5-flash was the default and is now refused for new API keys:
+    #   404 "This model models/gemini-2.5-flash is no longer available to new
+    #   users. Please update your code to use models/gemini-3.6-flash."
+    #
+    # Worth knowing how that failed. A 404 is caught as "the cloud is
+    # unavailable", so narration quietly served the deterministic template and
+    # escalated photographs came back "not identified" -- both correct, honest
+    # degradations, and both indistinguishable from an outage. /ready reported
+    # cloud_diagnosis ok throughout, because it checks that a key is present,
+    # not that the model answers.
+    gemini_narrate_model: str = "gemini-3.6-flash"
+    gemini_vision_model: str = "gemini-3.6-flash"
 
     # Google Maps Platform satellite basemap. Unset means OpenStreetMap street
     # tiles, which is the keyless path and still works. See

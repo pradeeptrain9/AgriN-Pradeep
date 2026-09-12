@@ -185,15 +185,59 @@ async def readiness(db: AsyncSession = Depends(get_db)) -> dict:
                 "until the 1st. Raise LLM_MONTHLY_USD_CAP to resume sooner.",
             ))
         else:
-            # Name both models. They are independently overridable from .env,
-            # and a stale override there silently outranks the code default --
-            # which is how narration ran on the expensive model after the
-            # cheaper one had been chosen.
-            checks.append(_check(
-                "cloud_diagnosis", "ok",
-                f"vision {settings.gemini_vision_model}, "
-                f"narration {settings.gemini_narrate_model}, "
-                f"${usd:.2f} of ${cap:.2f} used this month"))
+            from app.ai import gemini
+
+            # Present is not the same as answering. `gemini-2.5-flash` was
+            # withdrawn for new API keys and started returning 404; every
+            # narration quietly served the deterministic template and every
+            # escalated photograph came back "not identified", while this check
+            # reported ok because a key was configured. The satellite check
+            # learned the same lesson and this is the same fix.
+            #
+            # Reads model metadata rather than generating anything, so it costs
+            # no tokens -- which matters because /ready is unauthenticated and a
+            # check that spent money would let a stranger drain the cap.
+            refusals = [
+                (label, problem)
+                for label, model in (
+                    ("narration", settings.gemini_narrate_model),
+                    ("vision", settings.gemini_vision_model),
+                )
+                if (problem := await gemini.model_unavailable(
+                    settings.gemini_api_key, model)) is not None
+            ]
+
+            if refusals:
+                checks.append(_check(
+                    "cloud_diagnosis", "blocker",
+                    "; ".join(f"{label} model refused -- {why}" for label, why in refusals),
+                    "Narration falls back to the built-in English template and "
+                    "escalated photographs return 'not identified'. Both look "
+                    "like an outage from the app, so nothing else will tell you. "
+                    "Set GEMINI_NARRATE_MODEL / GEMINI_VISION_MODEL to a model "
+                    "this key can reach -- the error above usually names one.",
+                ))
+            elif budget.rate_for(settings.gemini_narrate_model) is None or \
+                    budget.rate_for(settings.gemini_vision_model) is None:
+                # An unpriced model bills zero, so the monthly cap stops binding
+                # and the node can spend without limit while reporting $0.00.
+                checks.append(_check(
+                    "cloud_diagnosis", "degraded",
+                    "a configured model has no price in ai/budget.py",
+                    "Its calls are billed at $0.00, so the monthly cap cannot "
+                    "stop them and /quota understates the real bill. Add the "
+                    "rate from https://ai.google.dev/gemini-api/docs/pricing.",
+                ))
+            else:
+                # Name both models. They are independently overridable from .env,
+                # and a stale override there silently outranks the code default --
+                # which is how narration ran on the expensive model after the
+                # cheaper one had been chosen.
+                checks.append(_check(
+                    "cloud_diagnosis", "ok",
+                    f"vision {settings.gemini_vision_model}, "
+                    f"narration {settings.gemini_narrate_model}, "
+                    f"${usd:.2f} of ${cap:.2f} used this month"))
 
     # --- districts drive aggregate grouping
     total = await db.scalar(text(

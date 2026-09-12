@@ -146,15 +146,21 @@ rather than not at all):
 
 | model | roughly, per photo | per 1,000 |
 |---|---|---|
+| gemini-3.6-flash | not yet published here | see the pricing page |
 | gemini-2.5-pro | $0.032 | $32 |
 | gemini-2.5-flash | $0.005 | $5 |
-| gemini-2.0-flash | $0.001 | $1 |
 
-For 100 farmers scanning four leaves a month, 224 escalate: about **$7/month on
-2.5-pro, $1 on 2.5-flash**. Set `GEMINI_VISION_MODEL` accordingly. Pro is the
-default because a misdiagnosis costs a farmer a spray or a season and the
-difference is a few dollars a month; drop to Flash only against measured accuracy
-on held-out photographs, not to save money in the abstract.
+For 100 farmers scanning four leaves a month, 224 escalate: single dollars a
+month at Flash rates. Set `GEMINI_VISION_MODEL` accordingly, and drop to a
+cheaper model only against measured accuracy on held-out photographs of your own
+crops, not to save money in the abstract -- a misdiagnosis costs a farmer a spray
+or a season.
+
+**`gemini-3.6-flash` is priced in `ai/budget.py` at the 2.5 Pro rate, which is
+an over-estimate and is marked as unverified.** That is deliberate: `price()`
+returns 0.00 for a model it does not recognise, and a model that costs nothing
+can never reach the monthly cap. Over-pricing makes the cap bind early;
+under-pricing removes it silently. Replace it with the real figure.
 
 Narration is a different trade and uses `GEMINI_NARRATE_MODEL`, defaulting to
 Flash. It only rephrases figures the engine already computed, and `ai/guard.py`
@@ -276,6 +282,24 @@ Compared with the two nearby shortcuts: `SMS_ALLOW_CONSOLE` opens one door to
 whoever can read the logs; `DEMO_PHONE` opens one door to whoever holds one
 published code; `AGRIN_ENV=dev` opens every door to everybody. Only the first
 two are defensible, and only on a node with no farmers on it.
+
+### When Google withdraws a model
+
+`gemini-2.5-flash` was the default and now returns 404 for new API keys:
+
+> This model models/gemini-2.5-flash is no longer available to new users.
+> Please update your code to use models/gemini-3.6-flash.
+
+The failure is quiet by construction. A 404 is caught as "the cloud is
+unavailable", so narration serves the deterministic template and escalated
+photographs return "not identified" -- both correct, honest degradations, and
+both identical to an outage from inside the app.
+
+`/ready` now asks Google whether each configured model will answer, by reading
+the model's metadata rather than generating anything, so it costs no tokens.
+A withdrawn model is reported as a **blocker** carrying Google's own message,
+which usually names the replacement. Set `GEMINI_NARRATE_MODEL` and
+`GEMINI_VISION_MODEL` and redeploy.
 
 ## Registration: what actually delays a launch
 
@@ -470,6 +494,9 @@ actually recorded.
 | One leaf photo, cloud fallback | `gemini-2.5-pro` | $0.0320 |
 | One leaf photo, cloud fallback | `gemini-2.5-flash` | $0.0053 |
 
+The 2.5 models are no longer available to new API keys, so these rows are kept
+only as an order-of-magnitude guide.
+
 **Narration dominates the bill, by roughly forty to one.** An advisory is read
 daily; a leaf photograph is occasional. Sizing a 20-farmer pilot with one field
 each, at one narration per field per day (what the cache allows once the weather
@@ -517,13 +544,13 @@ raise `LLM_MONTHLY_USD_CAP`, or move narration to a cheaper model -- see below.
   by code, not by model quality -- so a weaker model produces plainer sentences
   or gets rejected, and cannot produce a wrong number.
 
-  `GEMINI_NARRATE_MODEL` therefore defaults to `gemini-2.5-flash`: a weaker
+  `GEMINI_NARRATE_MODEL` therefore defaults to `gemini-3.6-flash`: a weaker
   model writes plainer sentences or gets rejected, and cannot write a wrong
   number.
 
   Vision is a different judgement: there the model *is* the answer, nothing
   downstream can check it, and a wrong disease costs a spray or a season. Leave
-  `GEMINI_VISION_MODEL` on `gemini-2.5-pro` unless you have measured a cheaper
+  `GEMINI_VISION_MODEL` on the strongest model your key can reach, unless you have measured a cheaper
   model on held-out photographs of your own crops.
 
   Request parameters are built in `ai/gemini.py`, which strips the JSON Schema
@@ -532,7 +559,7 @@ raise `LLM_MONTHLY_USD_CAP`, or move narration to a cheaper model -- see below.
   would swallow as "the cloud is unavailable", so a schema change that looks
   harmless can silently disable the feature. Adding a model means adding a price
   in `ai/budget.py`; `rate_for()` matches by family prefix, because Gemini
-  reports the version it actually served (`gemini-2.5-flash-002`) and an
+  reports the version it actually served (`gemini-3.6-flash-002`) and an
   exact-match table would price that at zero.
 
 Prompt caching is **not** used, and would do nothing here: both system prompts
