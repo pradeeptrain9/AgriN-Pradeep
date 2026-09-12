@@ -135,3 +135,113 @@ class TestPhotoStorageIsDetectedNotConfigured:
             media_root = str(tmp_path / "does-not-exist")
 
         assert asyncio.run(_media_check(Db(), Settings()))["level"] == "degraded"
+
+
+class TestCredentialsArePresentAndValid:
+    """Present is not the same as valid, and this check used to prove present.
+
+    A node with a typo'd Copernicus secret reported "satellite ok, 0 of 9000 PU
+    used this month" -- technically true, because a client that cannot
+    authenticate never spends any units -- while every refresh failed with a
+    401 that appeared only in stdout. /ready exists to answer "what is not
+    working" without reading logs, and on that node it answered wrongly.
+    """
+
+    @staticmethod
+    def _run(raises, tmp=None):
+        import asyncio
+
+        from app.api import readiness
+
+        class Settings:
+            cdse_client_id = "id"
+            cdse_client_secret = "secret"
+
+        original = readiness._cdse_rejects_us
+        assert callable(original)
+        return asyncio.run(readiness._cdse_rejects_us(Settings())) if raises is None else None
+
+    def test_an_authentication_refusal_is_this_nodes_fault(self, monkeypatch):
+        import asyncio
+
+        from app.api import readiness
+        from app.providers import sentinel
+
+        async def refuse(self, client):
+            raise sentinel.SentinelUnavailable(
+                'CDSE token request failed (401): {"error":"invalid_client"}'
+            )
+
+        monkeypatch.setattr(sentinel.CdseClient, "token", refuse)
+
+        class Settings:
+            cdse_client_id = "id"
+            cdse_client_secret = "wrong"
+
+        result = asyncio.run(readiness._cdse_rejects_us(Settings()))
+        assert result is not None
+        assert "invalid_client" in result
+
+    def test_copernicus_being_down_is_not_reported_as_misconfiguration(self, monkeypatch):
+        # Sending an operator to check credentials that are perfectly correct
+        # wastes the one thing they are short of when something is broken.
+        import asyncio
+
+        from app.api import readiness
+        from app.providers import sentinel
+
+        async def outage(self, client):
+            raise sentinel.SentinelUnavailable("CDSE token request failed (503): down")
+
+        monkeypatch.setattr(sentinel.CdseClient, "token", outage)
+
+        class Settings:
+            cdse_client_id = "id"
+            cdse_client_secret = "secret"
+
+        assert asyncio.run(readiness._cdse_rejects_us(Settings())) is None
+
+    def test_a_network_failure_never_raises(self, monkeypatch):
+        # /ready is opened when something is already wrong. It must report.
+        import asyncio
+
+        from app.api import readiness
+        from app.providers import sentinel
+
+        async def boom(self, client):
+            raise OSError("no route to host")
+
+        monkeypatch.setattr(sentinel.CdseClient, "token", boom)
+
+        class Settings:
+            cdse_client_id = "id"
+            cdse_client_secret = "secret"
+
+        assert asyncio.run(readiness._cdse_rejects_us(Settings())) is None
+
+    def test_working_credentials_report_nothing(self, monkeypatch):
+        import asyncio
+
+        from app.api import readiness
+        from app.providers import sentinel
+
+        async def ok(self, client):
+            return "a-token"
+
+        monkeypatch.setattr(sentinel.CdseClient, "token", ok)
+
+        class Settings:
+            cdse_client_id = "id"
+            cdse_client_secret = "secret"
+
+        assert asyncio.run(readiness._cdse_rejects_us(Settings())) is None
+
+    def test_rejection_is_graded_a_blocker(self):
+        # Crop health can never be scored, which is one of the three things
+        # this app claims to do.
+        import inspect
+
+        from app.api import readiness
+
+        source = inspect.getsource(readiness.readiness)
+        assert '"satellite", "blocker"' in source

@@ -154,19 +154,55 @@ def _build(payload: dict, lat: float, soil_var: str) -> list[DailyWeather]:
 
 
 async def _get(client: httpx.AsyncClient, url: str, params: dict) -> dict:
+    """Fetch with backoff, and say what actually went wrong when it does not.
+
+    The 429 branch used to `continue` without recording anything, so a node
+    that was rate-limited on all three attempts raised
+    "open-meteo request failed: None" -- a message that names neither the cause
+    nor anything an operator could act on. Rate limiting is the *expected*
+    failure on shared hosting, where the outbound IP belongs to the platform
+    and is shared with every other tenant on it, so it is the one case that
+    most needed saying out loud.
+
+    Retry-After is honoured when the server sends it. Open-Meteo's limits are
+    per-minute and per-hour; doubling from one second reaches four, which is
+    not a serious attempt to wait out either.
+    """
     last_error: Exception | None = None
+
     for attempt in range(3):
         try:
             response = await client.get(url, params=params, timeout=30.0)
             if response.status_code == 429:
-                await asyncio.sleep(2 ** attempt)
+                last_error = WeatherUnavailable(
+                    "rate limited (429). On shared hosting the outbound IP is "
+                    "the platform's and is shared with other tenants, so this "
+                    "can happen without this node having made any requests of "
+                    "its own."
+                )
+                await asyncio.sleep(_retry_after(response, attempt))
                 continue
             response.raise_for_status()
             return response.json()
         except httpx.HTTPError as exc:  # transient network/5xx
             last_error = exc
             await asyncio.sleep(2 ** attempt)
-    raise WeatherUnavailable(f"open-meteo request failed: {last_error}")
+
+    detail = f"{type(last_error).__name__}: {last_error}" if last_error else (
+        "no attempt succeeded and none reported why, which should not happen"
+    )
+    raise WeatherUnavailable(f"open-meteo request failed: {detail}")
+
+
+def _retry_after(response: httpx.Response, attempt: int) -> float:
+    """Seconds to wait, preferring the server's own instruction."""
+    header = response.headers.get("Retry-After", "")
+    try:
+        # Capped: a provider asking for ten minutes should not hold a farmer's
+        # refresh open. Better to fail, say why, and let them tap again.
+        return min(float(header), 30.0)
+    except ValueError:
+        return float(2 ** attempt)
 
 
 async def fetch_forecast(

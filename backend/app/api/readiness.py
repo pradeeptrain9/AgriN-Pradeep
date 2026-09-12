@@ -102,6 +102,20 @@ async def readiness(db: AsyncSession = Depends(get_db)) -> dict:
             "Crop health always reports 'not known'. Irrigation and fertiliser "
             "advice still work.",
         ))
+    elif (rejected := await _cdse_rejects_us(settings)) is not None:
+        # Present is not the same as valid, and this check used to only prove
+        # present. A node with a typo'd secret reported "satellite ok, 0 of
+        # 9000 PU used" -- technically true, since a client that cannot
+        # authenticate never spends any -- while every refresh failed with a
+        # 401 that only appeared in stdout. The whole point of /ready is to
+        # answer "what is not working" without reading logs.
+        checks.append(_check(
+            "satellite", "blocker", f"Copernicus rejected these credentials: {rejected}",
+            "Crop health can never be scored. Check CDSE_CLIENT_ID and "
+            "CDSE_CLIENT_SECRET against the OAuth client at "
+            "https://dataspace.copernicus.eu -- a secret is shown once, at "
+            "creation, and cannot be read back afterwards.",
+        ))
     else:
         spent = await db.scalar(text(
             "SELECT COALESCE(SUM(units),0) FROM pu_ledger "
@@ -253,6 +267,38 @@ async def _media_check(db: AsyncSession, settings) -> dict:
         "retraining set. Attach a persistent disk or object storage before a "
         "pilot.",
     )
+
+
+async def _cdse_rejects_us(settings) -> str | None:
+    """Ask Copernicus whether these credentials work. None means they do.
+
+    A token request costs no processing units -- it is the OAuth endpoint, not
+    the data API -- so this is free to run and spends nothing from the monthly
+    quota. It does cost a round trip, which is the right trade for the endpoint
+    an operator opens precisely when something is wrong.
+
+    A network failure returns None rather than a blocker: Copernicus being
+    briefly unreachable is not the same as this node being misconfigured, and
+    reporting it as one would send an operator hunting for a fault that is not
+    theirs.
+    """
+    import httpx
+
+    from app.providers.sentinel import CdseClient, SentinelUnavailable
+
+    try:
+        client = CdseClient(settings.cdse_client_id, settings.cdse_client_secret)
+        async with httpx.AsyncClient() as http:
+            await client.token(http)
+        return None
+    except SentinelUnavailable as exc:
+        message = str(exc)
+        # Only an authentication refusal is this node's fault.
+        if "401" in message or "invalid_client" in message:
+            return message[:160]
+        return None
+    except Exception:  # noqa: BLE001 - /ready must report, never raise
+        return None
 
 
 def _summarise(checks: list[dict]) -> dict:
