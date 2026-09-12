@@ -20,6 +20,17 @@ WEATHER_HISTORY_DAYS = 200
 # ERA5 reanalysis lags real time; asking for the last few days returns nothing.
 ARCHIVE_LAG_DAYS = 6
 
+# How far back to re-read satellite dates that are already stored. Covers a
+# Sentinel-2 revisit interval, so a scene reprocessed after first download is
+# picked up rather than frozen at its first value.
+RESCAN_OVERLAP_DAYS = 7
+
+# Minimum gap between Copernicus queries for the same field. Sentinel-2's
+# revisit is about five days, so anything shorter than this spends quota to
+# receive the same answer. Well under a revisit so a farmer who waits a day
+# still gets a fresh look.
+MIN_RECHECK_HOURS = 12
+
 
 async def ingest_weather(
     db: AsyncSession, field_id: str, lat: float, lon: float, *, history_days: int = WEATHER_HISTORY_DAYS
@@ -101,7 +112,69 @@ async def ingest_satellite(
 
     cdse = sentinel_provider.CdseClient(settings.cdse_client_id, settings.cdse_client_secret)
     end = date.today()
-    start = end - timedelta(days=history_days)
+
+    # Only ask for what is not already stored.
+    #
+    # This used to request the full history on every call, which is what a
+    # farmer tapping "Update from satellite" triggers. Two consecutive taps on
+    # the deployed node each spent 1.67 processing units to re-fetch two
+    # hundred days and rewrite the same seventy-two observations. Harmless at
+    # one field and not at twenty-five, where the free Copernicus quota is the
+    # thing standing between a pilot and no crop health at all.
+    #
+    # Processing units scale with area times time span, so narrowing a
+    # 200-day window to a fortnight is roughly a fortieth of the cost.
+    latest = await db.scalar(
+        text("SELECT max(time)::date FROM observations WHERE field_id = :id"),
+        {"id": field_id},
+    )
+    if latest is None:
+        start = end - timedelta(days=history_days)
+    else:
+        # Overlap deliberately. Sentinel-2 scenes are sometimes reprocessed and
+        # a later pass can improve a date already stored; the insert is an
+        # upsert, so re-reading a few days costs a little quota and corrects
+        # them. Never earlier than the history window, so a long-dormant field
+        # does not silently pull a year.
+        start = max(latest - timedelta(days=RESCAN_OVERLAP_DAYS),
+                    end - timedelta(days=history_days))
+
+    # Do not re-ask within a revisit interval. Sentinel-2 passes the same point
+    # every five days or so, so a farmer tapping Update twice in an afternoon
+    # is asking a question whose answer cannot have changed -- and paying quota
+    # for the privilege. The ledger already records when this field was last
+    # queried, so this needs no new state.
+    recent = await db.scalar(
+        text(
+            "SELECT max(created_at) FROM pu_ledger "
+            "WHERE field_id = :id AND endpoint = 'statistics'"
+        ),
+        {"id": field_id},
+    )
+    if recent is not None:
+        age_hours = (
+            datetime.now(timezone.utc) - recent
+        ).total_seconds() / 3600.0
+        if age_hours < MIN_RECHECK_HOURS:
+            return {
+                "observations": 0,
+                "processing_units": 0.0,
+                "intervals_returned": 0,
+                "intervals_rejected_for_cloud": 0,
+                "month_pu_spent": spent,
+                "skipped_checked_recently": 1,
+            }
+
+    if start >= end:
+        return {
+            "observations": 0,
+            "processing_units": 0.0,
+            "intervals_returned": 0,
+            "intervals_rejected_for_cloud": 0,
+            "month_pu_spent": spent,
+            "skipped_already_current": 1,
+        }
+
     result = await sentinel_provider.fetch_indices(
         cdse=cdse, geometry=geometry, start=start, end=end
     )

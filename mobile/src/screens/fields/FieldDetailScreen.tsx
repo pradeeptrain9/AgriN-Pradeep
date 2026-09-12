@@ -251,20 +251,33 @@ export const FieldDetailScreen: React.FC<{ route: any; navigation: any }> = ({
         </Section>
       ) : null}
 
+      {/* Branch on whether a picture exists, NOT on severity.
+          Severity is 'unknown' in two unrelated situations: the satellite has
+          never had a clear view, and it has but the view is more than twelve
+          days old, which downgrades an otherwise fine reading. Keying the text
+          off severity made the app say "No clear satellite picture of this
+          field yet" directly above "Last clear picture was 33 days ago" -- a
+          flat contradiction, and it threw away a real measurement the node had
+          computed. A month-old reading is not nothing; it is simply not now,
+          and the farmer can be told exactly that. */}
       <Section title="Crop health" right={<StatusPill severity={health?.severity} />}>
-        {health?.severity === 'unknown' ? (
+        {health?.latest_ndvi == null ? (
           <Text style={styles.body}>
             No clear satellite picture of this field yet, so health cannot be scored.
           </Text>
         ) : (
           <Text style={styles.body}>
-            Greenness {health?.latest_ndvi?.toFixed(2) ?? '—'} against{' '}
-            {health?.expected_ndvi?.toFixed(2) ?? '—'} expected at this stage.
+            Greenness {health.latest_ndvi.toFixed(2)} against{' '}
+            {health.expected_ndvi?.toFixed(2) ?? '—'} expected at this stage.
           </Text>
         )}
         {health?.is_stale && health.days_since_observation != null ? (
           <Text style={styles.warn}>
-            Last clear picture was {health.days_since_observation} days ago.
+            {health.latest_ndvi == null
+              ? `No clear picture for ${health.days_since_observation} days.`
+              : `That picture is ${health.days_since_observation} days old, so it `
+                + 'describes the crop then, not now. Clouds can hide a problem '
+                + 'that started since.'}
           </Text>
         ) : null}
         {health?.notes?.map((note, i) => (
