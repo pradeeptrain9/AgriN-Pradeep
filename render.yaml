@@ -27,8 +27,14 @@ services:
     runtime: docker
     plan: free
     region: singapore          # closest Render region to Punjab
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
+    # rootDir, and then paths relative to it. Two reasons this is not just
+    # style: it is the form Render's monorepo documentation specifies, and it
+    # stops every mobile-app or docs commit from rebuilding and redeploying the
+    # node -- this repo holds the Android app, the training pipeline and the
+    # backend, and only the last of those belongs in this image.
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     # /health is liveness: it answers even when the node is degraded. /ready
     # grades the dependencies and is the one a human should read -- but a node
     # with no satellite credentials is degraded, not dead, and restarting it
