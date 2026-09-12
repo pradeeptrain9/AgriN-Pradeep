@@ -120,6 +120,23 @@ class TestTheLogSaysWhichAndWhy:
         assert "unavailable" in out
         assert "FAILED" not in out
 
+    async def test_the_counts_are_logged_not_just_the_word_ok(self, ran, capsys, monkeypatch):
+        """A satellite run that finds nothing but cloud writes no observations,
+        spends processing units, raises nothing, and used to log the same word
+        as a run that worked. Crop health then reads "not known" with no way to
+        tell a cloudy fortnight from a broken pipeline."""
+        from app.api import advisory as module
+
+        async def cloudy(*_args, **_kwargs):
+            return {"observations": 0, "intervals_returned": 12,
+                    "intervals_rejected_for_cloud": 12}
+
+        monkeypatch.setattr(module, "ingest_satellite", cloudy)
+        await _refresh()
+        out = capsys.readouterr().out
+        assert "observations=0" in out
+        assert "intervals_rejected_for_cloud=12" in out
+
     async def test_success_is_logged_too(self, ran, capsys):
         # Otherwise silence is ambiguous: did it work, or did the task never
         # run at all? That ambiguity is what made this bug hard to see.

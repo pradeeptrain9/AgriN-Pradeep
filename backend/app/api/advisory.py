@@ -106,8 +106,21 @@ async def _refresh_field(field_id: str, lat: float, lon: float, geometry: dict) 
             ("satellite", ingest_satellite(db, field_id, geometry)),
         ):
             try:
-                await coro
-                print(f"[ingest] {label} ok for {field_id}")
+                summary = await coro
+                # The counts, not just "ok". Every ingest already returns them
+                # and they were being thrown away, which left the one question
+                # anyone actually asks unanswerable: a satellite run that finds
+                # nothing but cloud writes no observations, spends processing
+                # units, raises nothing, and logged exactly the same word as a
+                # run that worked. Crop health then reads "not known" with no
+                # way to tell a cloudy fortnight from a broken pipeline.
+                detail = ""
+                if isinstance(summary, dict):
+                    detail = " " + " ".join(
+                        f"{k}={v}" for k, v in summary.items()
+                        if isinstance(v, (int, float))
+                    )
+                print(f"[ingest] {label} ok for {field_id}{detail}")
             except (
                 WeatherUnavailable, SentinelUnavailable, ProcessingUnitCapReached
             ) as exc:
