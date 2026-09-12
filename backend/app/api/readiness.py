@@ -239,6 +239,46 @@ async def readiness(db: AsyncSession = Depends(get_db)) -> dict:
                     f"narration {settings.gemini_narrate_model}, "
                     f"${usd:.2f} of ${cap:.2f} used this month"))
 
+    # --- the optional Google services, every one of which fails to a working
+    # fallback. That is exactly why they need reporting: an unset key is
+    # indistinguishable, from the app, from a key that is set and wrong. The
+    # satellite basemap quietly serves street tiles, audio quietly 503s, and a
+    # Hindi template quietly stays English -- all of them look like a design
+    # choice rather than a missing environment variable.
+    #
+    # Presence only. None of these is probed live: /ready is unauthenticated,
+    # and Map Tiles sessions and TTS characters both cost money, so a probe
+    # here would hand a stranger a way to spend a node's budget.
+    optional = [
+        ("satellite basemap", bool(settings.google_maps_api_key),
+         "the map shows OpenStreetMap street tiles, not imagery"),
+        ("spoken advice", bool(settings.google_tts_api_key),
+         "advice is text only, which excludes farmers who do not read"),
+        ("template translation", bool(settings.google_translate_api_key),
+         "the fallback wording stays English, so the farmer whose node ran "
+         "out of credit is the one handed a language they may not read"),
+        ("vertex fallback", bool(settings.vertex_endpoint_id),
+         "a phone whose TFLite delegate will not load has no on-device "
+         "diagnosis and escalates every photograph"),
+        ("earth engine", bool(settings.earth_engine_project),
+         "NDVI stops when the Copernicus processing-unit cap is reached"),
+        ("bigquery export", bool(settings.bigquery_dataset),
+         "federation aggregates stay on this node"),
+    ]
+    off = [(name, why) for name, on, why in optional if not on]
+    if not off:
+        checks.append(_check(
+            "google_services", "ok", f"all {len(optional)} configured"))
+    else:
+        checks.append(_check(
+            "google_services", "degraded",
+            f"{len(off)} of {len(optional)} not configured: "
+            + ", ".join(name for name, _ in off),
+            "Each falls back to something that works, so nothing breaks and "
+            "nothing says so: " + "; ".join(f"{name} -- {why}" for name, why in off)
+            + ".",
+        ))
+
     # --- districts drive aggregate grouping
     total = await db.scalar(text(
         "SELECT count(*) FROM fields WHERE archived_at IS NULL")) or 0

@@ -245,3 +245,39 @@ class TestCredentialsArePresentAndValid:
 
         source = inspect.getsource(readiness.readiness)
         assert '"satellite", "blocker"' in source
+
+
+class TestOptionalGoogleServices:
+    """An unset key and a wrong key look identical from the app.
+
+    Every one of these falls back to something that works -- street tiles
+    instead of imagery, text instead of audio, English instead of Hindi -- so
+    the only thing that can tell an operator a key is missing is this check.
+    """
+
+    def test_each_configurable_google_service_is_reported(self):
+        source = inspect.getsource(readiness.readiness)
+        for setting in (
+            "google_maps_api_key",
+            "google_tts_api_key",
+            "google_translate_api_key",
+            "vertex_endpoint_id",
+            "earth_engine_project",
+            "bigquery_dataset",
+        ):
+            assert setting in source, (
+                f"{setting} is configurable but /ready never mentions it, so a "
+                "node running without it cannot be told apart from one whose "
+                "key is wrong."
+            )
+
+    def test_an_unset_optional_service_is_degraded_not_a_blocker(self):
+        source = inspect.getsource(readiness.readiness)
+        assert '"google_services", "degraded"' in source
+        assert '"google_services", "blocker"' not in source
+
+    def test_the_checks_do_not_spend_money(self):
+        """/ready is unauthenticated. A live probe of Map Tiles or TTS would
+        let a stranger bill the node by refreshing a URL."""
+        source = inspect.getsource(readiness.readiness)
+        assert "Presence only" in source

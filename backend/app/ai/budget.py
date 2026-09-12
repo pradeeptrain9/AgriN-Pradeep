@@ -23,6 +23,7 @@ down. Degraded, not broken.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,10 +37,26 @@ class BudgetReached(RuntimeError):
 
 @dataclass(frozen=True)
 class Rate:
-    """USD per million tokens, as published on the pricing page."""
+    """USD per million tokens, as published on the pricing page.
+
+    `until`/`then` exist because Google publishes dated increases -- Gemini 3.6
+    Flash doubles on 1 January 2027. Holding one figure would be wrong on one
+    side of that date, and only one of the two wrongs is safe: pricing at the
+    future rate overstates every month until then, and pricing at the current
+    rate lets spend run past the monthly cap afterwards, silently, on a node
+    nobody is watching. Holding both is exact on either side.
+    """
 
     input_usd: float
     output_usd: float
+    until: "date | None" = None
+    then: "Rate | None" = None
+
+    def on(self, day: "date") -> "Rate":
+        """The rate in force on `day`, following the schedule if there is one."""
+        if self.until is not None and self.then is not None and day > self.until:
+            return self.then.on(day)
+        return self
 
 
 # Google first-party rates. Deliberately a table and not a lookup at call
@@ -58,18 +75,14 @@ RATES: dict[str, Rate] = {
     "gemini-2.5-pro": Rate(input_usd=2.50, output_usd=15.00),
     "gemini-2.0-flash": Rate(input_usd=0.10, output_usd=0.40),
 
-    # UNVERIFIED. gemini-3.6-flash became the default because Google refused
-    # gemini-2.5-flash for new keys, and its published price has not been
-    # checked against this table. The figure below is a deliberate over-estimate
-    # -- priced at the 2.5 *Pro* rate -- for one reason: `price()` returns 0.0
-    # for a model it does not know, and a model that costs nothing can never
-    # reach llm_monthly_usd_cap. Over-pricing makes the cap bind early and
-    # overstates the bill; under-pricing removes the cap silently. Only one of
-    # those is recoverable.
-    #
-    # Replace with the real rate from
-    # https://ai.google.dev/gemini-api/docs/pricing and drop this comment.
-    "gemini-3.6-flash": Rate(input_usd=2.50, output_usd=15.00),
+    # Checked against the pricing page on 2026-09-12. Standard (non-batch)
+    # tier, which is what `generate()` calls.
+    "gemini-3.6-flash": Rate(
+        input_usd=0.75,
+        output_usd=3.75,
+        until=date(2026, 12, 31),
+        then=Rate(input_usd=1.50, output_usd=7.50),
+    ),
 }
 
 # Gemini reports the model it actually served as e.g. "gemini-2.5-flash-002".
@@ -88,7 +101,7 @@ CACHE_READ_MULTIPLIER = 0.1
 CACHE_WRITE_MULTIPLIER = 1.25
 
 
-def price(model: str, usage: object) -> float:
+def price(model: str, usage: object, *, on: date | None = None) -> float:
     """USD for one response, from the four token counts the API reports.
 
     An unknown model prices at zero rather than guessing. A wrong number in the
@@ -97,6 +110,7 @@ def price(model: str, usage: object) -> float:
     rate = rate_for(model)
     if rate is None:
         return 0.0
+    rate = rate.on(on or date.today())
 
     per_input = rate.input_usd / 1_000_000
     per_output = rate.output_usd / 1_000_000

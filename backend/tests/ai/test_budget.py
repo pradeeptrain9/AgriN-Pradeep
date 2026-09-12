@@ -89,3 +89,37 @@ def test_a_served_model_name_with_a_suffix_still_prices():
     # price that at zero, and a model that costs nothing never reaches the cap.
     assert budget.price("gemini-2.5-flash-002", FakeUsage(input_tokens=1_000_000)) \
         == pytest.approx(0.30)
+
+
+def test_the_published_rate_for_the_default_model():
+    # Standard tier, https://ai.google.dev/gemini-api/docs/pricing, 2026-09-12.
+    from datetime import date
+
+    today = date(2026, 9, 12)
+    assert budget.price(
+        "gemini-3.6-flash", FakeUsage(input_tokens=1_000_000), on=today
+    ) == pytest.approx(0.75)
+    assert budget.price(
+        "gemini-3.6-flash", FakeUsage(output_tokens=1_000_000), on=today
+    ) == pytest.approx(3.75)
+
+
+def test_a_dated_price_increase_is_charged_from_the_day_it_takes_effect():
+    # Gemini 3.6 Flash doubles on 1 January 2027. A node running unattended
+    # past that date must not keep billing itself the old rate, or the monthly
+    # cap stops binding at the figure it promises.
+    from datetime import date
+
+    usage = FakeUsage(input_tokens=1_000_000, output_tokens=1_000_000)
+    before = budget.price("gemini-3.6-flash", usage, on=date(2026, 12, 31))
+    after = budget.price("gemini-3.6-flash", usage, on=date(2027, 1, 1))
+    assert after == pytest.approx(before * 2)
+
+
+def test_a_served_variant_inherits_the_dated_schedule():
+    from datetime import date
+
+    usage = FakeUsage(input_tokens=1_000_000)
+    assert budget.price(
+        "gemini-3.6-flash-preview-11-2026", usage, on=date(2027, 6, 1)
+    ) == pytest.approx(1.50)
