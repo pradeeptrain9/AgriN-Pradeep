@@ -297,7 +297,7 @@ async def create_diagnosis(
         disease = get_disease(identification.disease_code) if identified else None
         confidence = identification.confidence if identification else 0.0
         if identified:
-            resolved_by = Route.CLAUDE_VISION.value
+            resolved_by = Route.CLOUD_VISION.value
         elif identification is not None and identification.provisional_name:
             resolved_by = Route.PROVISIONAL.value
         else:

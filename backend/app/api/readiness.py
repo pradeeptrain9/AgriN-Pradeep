@@ -168,7 +168,7 @@ async def readiness(db: AsyncSession = Depends(get_db)) -> dict:
     # --- cloud diagnosis fallback
     if not settings.gemini_api_key:
         checks.append(_check(
-            "cloud_diagnosis", "degraded", "no ANTHROPIC_API_KEY",
+            "cloud_diagnosis", "degraded", "no GEMINI_API_KEY",
             "About 56% of leaf photos fail the on-device confidence gate and "
             "return 'inconclusive' instead of a diagnosis.",
         ))
