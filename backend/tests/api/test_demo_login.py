@@ -82,11 +82,26 @@ class TestItOpensForExactlyOneNumber:
         "+919876543211",      # one digit away
         "+91987654321",       # a prefix of it
         "+9198765432100",     # it, with a digit appended
-        "919876543210",       # same digits, no country prefix
         "+911234567890",
     ])
     def test_every_other_number_goes_through_the_real_gateway(self, other):
         assert is_demo_phone(other, CONFIGURED) is False
+
+    @pytest.mark.parametrize("same_number", [
+        "9876543210",         # what a farmer types
+        "09876543210",        # with the trunk prefix
+        "919876543210",       # country code, no plus
+    ])
+    def test_the_same_number_spelled_differently_is_the_same_number(self, same_number):
+        """This case used to assert the opposite, and that was the bug.
+
+        These are not other numbers; they are one number written the way
+        people write it. Treating them as distinct meant the demo door did not
+        open from the app at all -- a farmer types ten digits -- while working
+        from any client that typed the +91 form. The same mistake gave real
+        farmers a second empty account when they reinstalled. See app/phone.py.
+        """
+        assert is_demo_phone(same_number, CONFIGURED) is True
 
     def test_a_prefix_match_is_not_a_match(self):
         # Guarding against a future `startswith`, which would open the door to

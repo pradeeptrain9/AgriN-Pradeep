@@ -9,6 +9,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app import phone as phone_utils
+from app.config import get_settings
+
 
 class OtpRequest(BaseModel):
     phone: str = Field(min_length=6, max_length=20)
@@ -18,10 +21,13 @@ class OtpRequest(BaseModel):
     @field_validator("phone")
     @classmethod
     def normalise_phone(cls, value: str) -> str:
-        cleaned = value.strip().replace(" ", "").replace("-", "")
+        cleaned = phone_utils.clean(value)
         if not cleaned.lstrip("+").isdigit():
             raise ValueError("phone must be digits, optionally prefixed with +")
-        return cleaned
+        # The node's country, not the request's: `country` is a field a client
+        # sets and a farmer never sees, so trusting it would let the same
+        # number normalise two ways on the same node.
+        return phone_utils.to_e164(cleaned, get_settings().node_country)
 
 
 class OtpVerify(BaseModel):
@@ -31,7 +37,10 @@ class OtpVerify(BaseModel):
     @field_validator("phone")
     @classmethod
     def normalise_phone(cls, value: str) -> str:
-        return value.strip().replace(" ", "").replace("-", "")
+        # Must match OtpRequest exactly. The OTP was stored against the
+        # normalised form, so a different rule here fails every verification
+        # with "Incorrect code" and tells the farmer nothing true.
+        return phone_utils.to_e164(value, get_settings().node_country)
 
 
 class TokenResponse(BaseModel):

@@ -30,14 +30,18 @@ from __future__ import annotations
 CODE_LENGTH = 6
 
 
-def normalise_phone(value: str) -> str:
-    """The same cleaning `OtpRequest` applies, so comparison is like for like.
+def normalise_phone(value: str, country: str = "IN") -> str:
+    """The same normalisation `OtpRequest` applies, so comparison is like for like.
 
-    Without this, DEMO_PHONE="+91 98765 43210" would never match the normalised
-    "+919876543210" that arrives from the app, and the door would silently not
-    work -- which is a confusing failure but, note, the safe direction.
+    Cleaning alone was not enough. DEMO_PHONE is naturally written
+    "+919876543210", the app sends what the farmer types, and a farmer types
+    ten digits -- so the two never met and the demo door did not open from the
+    app at all, while working perfectly from any client that typed the +91
+    form. Both sides now go through `phone.to_e164`.
     """
-    return (value or "").strip().replace(" ", "").replace("-", "")
+    from app import phone as phone_utils
+
+    return phone_utils.to_e164(value, country)
 
 
 def code_is_well_formed(code: str) -> bool:
@@ -50,7 +54,7 @@ def code_is_well_formed(code: str) -> bool:
 
 
 def demo_login_enabled(settings) -> bool:
-    phone = normalise_phone(settings.demo_phone)
+    phone = normalise_phone(settings.demo_phone, getattr(settings, "node_country", "IN"))
     # min_length=6 on OtpRequest; anything shorter could not be submitted
     # anyway, and a one- or two-character value is far more likely to be a
     # mistake than an intention.
@@ -65,4 +69,5 @@ def is_demo_phone(phone: str, settings) -> bool:
     """
     if not demo_login_enabled(settings):
         return False
-    return normalise_phone(phone) == normalise_phone(settings.demo_phone)
+    country = getattr(settings, "node_country", "IN")
+    return normalise_phone(phone, country) == normalise_phone(settings.demo_phone, country)
