@@ -13,12 +13,23 @@ What this proves, in order:
 """
 
 import json
+import os
+import pathlib
 import sys
 import urllib.error
 import urllib.request
 
-IN = "http://127.0.0.1:8099"
-BR = "http://127.0.0.1:8100"
+# Steps 5 and 6 verify signatures locally, which needs the node's own signing
+# module. Added here rather than requiring the caller to know: the point of
+# this script is that someone can run it without being told how.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "backend"))
+
+# Both overridable so the exchange can be run against a node that is actually
+# deployed rather than two processes on one laptop. Pointing AGRIN_PEER_URL at
+# a live node is the more convincing demonstration and exercises exactly the
+# same code: discovery, key pinning, signature verification over the wire.
+IN = os.environ.get("AGRIN_PEER_URL", "http://127.0.0.1:8099").rstrip("/")
+BR = os.environ.get("AGRIN_LOCAL_URL", "http://127.0.0.1:8100").rstrip("/")
 
 
 def call(method: str, url: str, body=None):
@@ -39,10 +50,15 @@ def rule(title: str) -> None:
 
 def main() -> int:
     rule("1. Two nodes, two identities")
-    _, a = call("GET", f"{IN}/federation/.well-known/agrin-node")
-    _, b = call("GET", f"{BR}/federation/.well-known/agrin-node")
-    print(f"  {a['node_id']:<8} ({a['country']})  key {a['public_key'][:28]}...")
-    print(f"  {b['node_id']:<8} ({b['country']})  key {b['public_key'][:28]}...")
+    _, a = call("GET", f"{IN}/.well-known/agrin-node")
+    _, b = call("GET", f"{BR}/.well-known/agrin-node")
+    def who(node: dict) -> str:
+        # A state node says which state. Two nodes both reading "IN" are the
+        # same node as far as a discovery document is concerned.
+        return node.get("region") or node["country"]
+
+    print(f"  {a['node_id']:<10} ({who(a)})  key {a['public_key'][:28]}...")
+    print(f"  {b['node_id']:<10} ({who(b)})  key {b['public_key'][:28]}...")
     if a["public_key"] == b["public_key"]:
         print("  FAIL: both nodes share a key; this is not a federation")
         return 1

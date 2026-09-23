@@ -281,6 +281,7 @@ async def conformance() -> dict:
 @router.post("/peers", status_code=201)
 async def add_peer(
     base_url: str = Body(..., embed=True),
+    accept_key_change: bool = Body(False, embed=True),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Register a peer by URL, pinning the key it presents at this moment.
@@ -292,34 +293,90 @@ async def add_peer(
     This is trust-on-first-use, and it is stated as such rather than dressed up:
     the pin is only as good as this first contact. A production deployment would
     confirm the key out of band before calling this.
+
+    A peer whose key has changed since it was pinned is refused rather than
+    quietly re-pinned, and refused rather than quietly ignored -- both of which
+    this endpoint has done. It answered 201 with `key_pinned: true` and "the
+    public key recorded now is the only one that will be accepted", while the
+    upsert deliberately left the old key in place. Every later pull then failed
+    with "failed verification against the pinned key", which reads as the peer
+    being broken or hostile when the truth is a stale pin on this side. The
+    security behaviour was right and the report of it was false.
     """
     descriptor = await peer_client.discover(base_url)
     warnings = peer_client.assess_policy(descriptor)
 
-    await db.execute(
-        text(
-            "INSERT INTO peer_nodes (node_id, public_key, base_url, country, trusted) "
-            "VALUES (:id, :key, :url, :country, :trusted) "
-            "ON CONFLICT (node_id) DO UPDATE SET base_url = EXCLUDED.base_url, "
-            "country = EXCLUDED.country, last_seen_at = now()"
-        ),
-        {
-            "id": descriptor.node_id, "key": descriptor.public_key,
-            "url": descriptor.base_url, "country": descriptor.country,
-            "trusted": not warnings,
-        },
-    )
+    existing = (await db.execute(
+        text("SELECT public_key FROM peer_nodes WHERE node_id = :id"),
+        {"id": descriptor.node_id},
+    )).scalar()
+
+    key_changed = existing is not None and existing != descriptor.public_key
+    if key_changed and not accept_key_change:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"'{descriptor.node_id}' is already pinned to a different key. "
+                "Either the node was rebuilt and lost its identity, or something "
+                "is impersonating it. Confirm the new key out of band -- not over "
+                "this connection -- then repeat this call with "
+                "accept_key_change=true. Until then the old key stands and every "
+                "payload from this peer will fail verification."
+            ),
+        )
+
+    if key_changed:
+        await db.execute(
+            text(
+                "UPDATE peer_nodes SET public_key = :key, base_url = :url, "
+                "country = :country, trusted = :trusted, last_seen_at = now() "
+                "WHERE node_id = :id"
+            ),
+            {
+                "id": descriptor.node_id, "key": descriptor.public_key,
+                "url": descriptor.base_url, "country": descriptor.country,
+                "trusted": not warnings,
+            },
+        )
+    else:
+        await db.execute(
+            text(
+                "INSERT INTO peer_nodes (node_id, public_key, base_url, country, trusted) "
+                "VALUES (:id, :key, :url, :country, :trusted) "
+                "ON CONFLICT (node_id) DO UPDATE SET base_url = EXCLUDED.base_url, "
+                "country = EXCLUDED.country, last_seen_at = now()"
+            ),
+            {
+                "id": descriptor.node_id, "key": descriptor.public_key,
+                "url": descriptor.base_url, "country": descriptor.country,
+                "trusted": not warnings,
+            },
+        )
     await db.commit()
-    return {
-        "peer": descriptor.to_dict(),
-        "key_pinned": True,
-        "trusted": not warnings,
-        "warnings": warnings,
-        "note": (
+
+    if existing is None:
+        note = (
             "The public key recorded now is the only one that will be accepted "
             "from this peer. A key change will show up as a verification failure, "
             "which is the intended behaviour."
-        ),
+        )
+    elif key_changed:
+        note = (
+            "The pinned key was REPLACED at your explicit request. Everything "
+            "this peer signed with the old key will now fail verification."
+        )
+    else:
+        note = "Already pinned, and the key it presents is unchanged."
+
+    return {
+        "peer": descriptor.to_dict(),
+        # True only when this call is what put the key there.
+        "key_pinned": existing is None or key_changed,
+        "already_known": existing is not None,
+        "key_changed": key_changed,
+        "trusted": not warnings,
+        "warnings": warnings,
+        "note": note,
     }
 
 
