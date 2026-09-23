@@ -120,6 +120,11 @@ class NarrationResult:
     retried: bool = False
     translated: bool = True
     notes: list[str] = dc_field(default_factory=list)
+    # Why the model did not write this, when the template did. Empty on a
+    # successful narration and on a node with no key -- that case has its own
+    # note. Present exactly when something went wrong that nobody would
+    # otherwise see, because a farmer reading correct advice cannot tell.
+    fallback_reason: str | None = None
     # One entry per billed request. The guard's corrective round makes a second
     # call, and a retry that is not recorded is spend that does not exist as far
     # as the budget is concerned.
@@ -137,6 +142,7 @@ class NarrationResult:
             "retried": self.retried,
             "translated": self.translated,
             "notes": self.notes,
+            "fallback_reason": self.fallback_reason,
         }
 
 
@@ -436,6 +442,7 @@ def _guarded(
             response = call(messages)
         except errors as exc:
             logger.warning("%s narration unavailable (%s)", source, exc)
+            _LAST_ERROR.append(f"{source}: {exc}")
             return None
 
         usage = getattr(response, "usage", None)
@@ -444,11 +451,15 @@ def _guarded(
 
         if getattr(response, "stop_reason", None) == "refusal":
             logger.warning("%s narration refused by the model", source)
+            _LAST_ERROR.append(f"{source}: the model refused to answer")
             return None
 
         data = _extract_json(response)
         if data is None:
             logger.warning("%s narration was not valid JSON", source)
+            _LAST_ERROR.append(
+                f"{source}: the reply was not the JSON this node asked for"
+            )
             return None
 
         violations = check_narration(data, payload)
@@ -491,6 +502,13 @@ def _guarded(
     return None
 
 
+# Why the model did not produce the words, when it was not the guard. Every
+# fallback to the template was previously indistinguishable from every other:
+# `guard_violations: []` and the note "fell back to the built-in template",
+# which is true and says nothing. Diagnosing a silent fallback then meant
+# reading logs on a host, and twice it meant days of not noticing at all.
+_LAST_ERROR: list[str] = []
+
 # Carries the guard's complaint out of _guarded so the template can report it.
 # A list rather than a return value because a guard failure and a transport
 # failure both mean "try the next provider", and collapsing them into one
@@ -509,6 +527,7 @@ def narrate(payload: dict, *, lang: str = "en", client=None) -> NarrationResult:
     language = LANGUAGES.get(lang, LANGUAGES["en"])
     template = build_template_narration(payload)
     _LAST_VIOLATIONS.clear()
+    _LAST_ERROR.clear()
 
     compact = json.dumps(payload, sort_keys=True, default=str)
     messages: list[dict] = [
@@ -568,5 +587,9 @@ def narrate(payload: dict, *, lang: str = "en", client=None) -> NarrationResult:
         template.translated = lang == "en"
         template.lang = "en"
     else:
-        template.notes.append("Narration fell back to the built-in template.")
+        # Name the cause. "Fell back to the template" alone is true, useless,
+        # and exactly what made two silent outages take days to see.
+        reason = _LAST_ERROR[0] if _LAST_ERROR else "the model did not answer"
+        template.notes.append(f"Narration fell back to the built-in template ({reason}).")
+        template.fallback_reason = reason
     return template

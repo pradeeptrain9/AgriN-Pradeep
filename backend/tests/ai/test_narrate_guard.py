@@ -67,3 +67,61 @@ class TestNoCropScreen:
         result = build_template_narration({"status": "no_crop"}, lang="ru")
         assert result.lang == "en"
         assert result.translated is False
+
+
+class TestWhyTheTemplateAnswered:
+    """A silent fallback is indistinguishable from a working node.
+
+    Twice now the model stopped answering and nothing said so: the advice was
+    correct, the farmer saw nothing wrong, and the only signal was a log line
+    on a host nobody was reading. `guard_violations: []` plus "fell back to
+    the built-in template" is true and tells an operator nothing.
+    """
+
+    def test_a_transport_failure_is_named(self):
+        from app.ai import gemini, narrate as narrate_mod
+
+        def refuse(*args, **kwargs):
+            raise gemini.GeminiUnavailable("Gemini request failed (429): quota")
+
+        original = narrate_mod._call_gemini
+        available = narrate_mod.gemini.available
+        narrate_mod._call_gemini = refuse
+        narrate_mod.gemini.available = lambda settings: True
+        try:
+            result = narrate_mod.narrate({"status": "ok", "crop": {}}, lang="en")
+        finally:
+            narrate_mod._call_gemini = original
+            narrate_mod.gemini.available = available
+
+        assert result.source == "template"
+        assert result.fallback_reason is not None
+        assert "429" in result.fallback_reason
+        assert any("429" in note for note in result.notes)
+
+    def test_an_empty_completion_is_named_as_such(self):
+        from app.ai import gemini, narrate as narrate_mod
+
+        def empty(*args, **kwargs):
+            raise gemini.GeminiRejected("empty completion (finishReason=MAX_TOKENS)")
+
+        original = narrate_mod._call_gemini
+        available = narrate_mod.gemini.available
+        narrate_mod._call_gemini = empty
+        narrate_mod.gemini.available = lambda settings: True
+        try:
+            result = narrate_mod.narrate({"status": "ok", "crop": {}}, lang="en")
+        finally:
+            narrate_mod._call_gemini = original
+            narrate_mod.gemini.available = available
+
+        assert "MAX_TOKENS" in (result.fallback_reason or "")
+
+    def test_a_successful_narration_carries_no_reason(self):
+        from app.ai.narrate import build_template_narration
+
+        # The template is also the answer on a node with no key at all, and
+        # that case has its own note -- inventing a failure there would send an
+        # operator after a fault that does not exist.
+        result = build_template_narration({"status": "no_crop"})
+        assert result.fallback_reason is None
