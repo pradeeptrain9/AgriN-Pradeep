@@ -187,16 +187,19 @@ async def readiness(db: AsyncSession = Depends(get_db)) -> dict:
         else:
             from app.ai import gemini
 
-            # Present is not the same as answering. `gemini-2.5-flash` was
-            # withdrawn for new API keys and started returning 404; every
-            # narration quietly served the deterministic template and every
-            # escalated photograph came back "not identified", while this check
-            # reported ok because a key was configured. The satellite check
-            # learned the same lesson and this is the same fix.
+            # Present is not the same as answering, and answering metadata is
+            # not the same as answering. Both weaker versions of this check
+            # shipped and both reported ok through a real outage: first while a
+            # withdrawn model 404'd every call, then while generateContent
+            # refused a model whose metadata still read back perfectly. Each
+            # time, narration served the deterministic template and escalated
+            # photographs came back "not identified" -- honest degradations,
+            # indistinguishable from an outage, with nothing saying so.
             #
-            # Reads model metadata rather than generating anything, so it costs
-            # no tokens -- which matters because /ready is unauthenticated and a
-            # check that spent money would let a stranger drain the cap.
+            # So the probe generates one token and the answer is cached for ten
+            # minutes. /ready is unauthenticated, so the cache is what stops a
+            # stranger billing the node by refreshing the page; the residual
+            # cost is around a hundredth of a cent a month.
             refusals = [
                 (label, problem)
                 for label, model in (

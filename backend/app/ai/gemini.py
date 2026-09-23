@@ -35,6 +35,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import time
 from dataclasses import dataclass, field as dc_field
 from typing import Any
 
@@ -304,21 +305,35 @@ def json_from(response: GeminiResponse) -> dict | None:
     return None
 
 
+# The probe below spends money, so its answer is held and reused. /ready is
+# unauthenticated: without this, refreshing the URL would be a way for a
+# stranger to bill the node.
+_PROBE_TTL_SECONDS = 600
+_probe_cache: dict[str, tuple[float, str | None]] = {}
+
+
 async def model_unavailable(api_key: str, model: str) -> str | None:
-    """Ask Google whether this model will answer. None means it will.
+    """Ask the model to answer. None means it did.
 
-    Reads the model's metadata rather than generating anything, so it costs no
-    tokens and nothing from the budget. That matters because `/ready` is
-    unauthenticated: a check that spent money would turn the readiness endpoint
-    into a way for a stranger to drain a node's monthly cap.
+    Two versions of this check have now been wrong in the same direction.
 
-    This exists because the alternative failed in exactly the way `/ready` is
-    supposed to catch. `gemini-2.5-flash` was withdrawn for new API keys and
-    began returning 404. Every narration silently served the deterministic
-    template and every escalated photograph came back "not identified" -- both
-    honest degradations, and both identical to an outage from the outside --
-    while `/ready` reported cloud_diagnosis `ok`, because a key was present.
-    Present has never been the same as valid.
+    The first looked only for an API key. `gemini-2.5-flash` was withdrawn for
+    new keys and began returning 404: every narration quietly served the
+    deterministic template, every escalated photograph came back "not
+    identified", and `/ready` reported `ok` throughout, because a key was
+    present. Present is not valid.
+
+    The second read the model's metadata with a GET, which costs nothing. That
+    caught a withdrawn model and nothing else -- and the next failure was not a
+    withdrawn model. `models/gemini-3.6-flash` kept answering GET perfectly
+    while `generateContent` refused, so narration served the template for days
+    with `/ready` still green. Metadata is not capability.
+
+    So this generates. One token, the smallest request the API accepts, and the
+    answer is cached for ten minutes -- which bounds an unauthenticated
+    endpoint to roughly a hundredth of a cent a month and still notices a dead
+    key within ten minutes. The cost is real and small; the alternative was a
+    check that could not fail.
 
     A transport failure returns None. Google being briefly unreachable is not a
     misconfiguration of this node, and reporting it as one sends an operator
@@ -327,15 +342,28 @@ async def model_unavailable(api_key: str, model: str) -> str | None:
     if not api_key:
         return None
 
+    key = f"{model}:{api_key[-6:]}"
+    cached = _probe_cache.get(key)
+    if cached and cached[0] > time.time():
+        return cached[1]
+
+    body = {
+        "contents": [{"role": "user", "parts": [{"text": "ping"}]}],
+        "generationConfig": {"maxOutputTokens": 1, "temperature": 0},
+    }
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{BASE_URL}/{model}", params={"key": api_key}, timeout=15.0
+            response = await client.post(
+                f"{BASE_URL}/{model}:generateContent",
+                params={"key": api_key},
+                json=body,
+                timeout=20.0,
             )
     except httpx.HTTPError:
         return None
 
     if response.status_code == 200:
+        _probe_cache[key] = (time.time() + _PROBE_TTL_SECONDS, None)
         return None
 
     detail = ""
@@ -344,6 +372,9 @@ async def model_unavailable(api_key: str, model: str) -> str | None:
     except ValueError:
         detail = response.text[:200]
 
-    # Google's 404 names the replacement model, which is the single most useful
-    # thing an operator can be told here, so it is passed through whole.
-    return f"{response.status_code}: {detail or 'no detail given'}"
+    # Google's 404 names the replacement model, and its 429 names which quota
+    # ran out. That is the single most useful thing an operator can be told
+    # here, so it is passed through whole.
+    problem = f"{response.status_code}: {detail or 'no detail given'}"
+    _probe_cache[key] = (time.time() + _PROBE_TTL_SECONDS, problem)
+    return problem

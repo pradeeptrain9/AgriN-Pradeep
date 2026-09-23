@@ -321,7 +321,7 @@ class TestAWithdrawnModelCannotReportHealthy:
 
             async def __aenter__(self): return self
             async def __aexit__(self, *a): return False
-            async def get(self, *a, **k): return self
+            async def post(self, *a, **k): return self
             def json(self):
                 return {"error": {"message":
                     "This model models/gemini-2.5-flash is no longer available "
@@ -359,7 +359,7 @@ class TestAWithdrawnModelCannotReportHealthy:
         class Down:
             async def __aenter__(self): return self
             async def __aexit__(self, *a): return False
-            async def get(self, *a, **k): raise httpx.ConnectError("boom")
+            async def post(self, *a, **k): raise httpx.ConnectError("boom")
 
         original = httpx.AsyncClient
         httpx.AsyncClient = lambda *a, **k: Down()
@@ -368,16 +368,56 @@ class TestAWithdrawnModelCannotReportHealthy:
         finally:
             httpx.AsyncClient = original
 
-    def test_the_probe_generates_nothing(self):
-        # /ready is unauthenticated. A check that spent tokens would let a
-        # stranger drain the monthly cap by polling it.
+    def test_the_probe_actually_generates(self):
+        """Metadata is not capability, and that distinction cost days.
+
+        The previous probe read the model's metadata with a GET, which costs
+        nothing and answers a different question. `models/gemini-3.6-flash`
+        kept answering GET perfectly while `generateContent` refused, so
+        narration served the deterministic template for days with /ready still
+        reporting ok. A check that cannot fail is not a check.
+        """
         import inspect
 
         from app.ai import gemini
 
         source = inspect.getsource(gemini.model_unavailable)
-        assert "generateContent" not in source
-        assert ".get(" in source and ".post(" not in source
+        assert "generateContent" in source
+        assert "maxOutputTokens" in source
+
+    def test_the_answer_is_cached_so_the_endpoint_cannot_be_billed(self):
+        # /ready is unauthenticated. Without a cache, refreshing the URL would
+        # be a way for a stranger to spend a node's budget.
+        from app.ai import gemini
+
+        assert gemini._PROBE_TTL_SECONDS >= 300
+
+    @pytest.mark.asyncio
+    async def test_a_cached_answer_is_reused_rather_than_re_billed(self):
+        import httpx
+
+        from app.ai import gemini
+
+        calls = []
+
+        class Ok:
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def post(self, *a, **k):
+                calls.append(1)
+                return type("R", (), {"status_code": 200, "json": lambda self: {}})()
+
+        gemini._probe_cache.clear()
+        original = httpx.AsyncClient
+        httpx.AsyncClient = lambda *a, **k: Ok()
+        try:
+            assert await gemini.model_unavailable("key-abcdef", "gemini-3.6-flash") is None
+            assert await gemini.model_unavailable("key-abcdef", "gemini-3.6-flash") is None
+        finally:
+            httpx.AsyncClient = original
+            gemini._probe_cache.clear()
+
+        assert len(calls) == 1, "the probe billed twice for one answer"
 
 
 class TestEveryConfiguredModelHasAPrice:
